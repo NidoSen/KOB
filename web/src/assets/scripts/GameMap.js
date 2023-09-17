@@ -3,7 +3,7 @@ import { Wall } from "./Wall";
 import { Snake } from './Snake';
 
 export class GameMap extends AcGameObject {
-    constructor(ctx, parent) {
+    constructor(ctx, parent) { // 构造函数，ctx是前端提供的画布，parent为画布的父元素
         super();
 
         this.ctx = ctx;
@@ -12,13 +12,13 @@ export class GameMap extends AcGameObject {
 
         this.rows = 13;
         this.cols = 14;
-        
+
         this.inner_walls_count = 20;
         this.walls = [];
 
         this.snakes = [
-            new Snake({id: 0, color: "#4876EC", r: this.rows - 2, c: 1}, this),
-            new Snake({id: 1, color: "#F94848", r: 1, c: this.cols - 2}, this),
+            new Snake({ id: 0, color: "#4876EC", r: this.rows - 2, c: 1 }, this),
+            new Snake({ id: 1, color: "#F94848", r: 1, c: this.cols - 2 }, this),
         ];
     }
 
@@ -27,7 +27,7 @@ export class GameMap extends AcGameObject {
         g[sx][sy] = true;
 
         let dx = [-1, 0, 1, 0], dy = [0, 1, 0, -1];
-        for (let i = 0; i < 4; i ++ ) {
+        for (let i = 0; i < 4; i++) {
             let x = sx + dx[i], y = sy + dy[i];
             if (!g[x][y] && this.check_connectivity(g, x, y, tx, ty))
                 return true;
@@ -38,29 +38,29 @@ export class GameMap extends AcGameObject {
 
     create_walls() {
         const g = [];
-        for (let r = 0; r < this.rows; r ++ ) {
+        for (let r = 0; r < this.rows; r++) {
             g[r] = [];
-            for (let c = 0; c < this.cols; c ++ ) {
+            for (let c = 0; c < this.cols; c++) {
                 g[r][c] = false;
             }
         }
 
         // 给四周加上障碍物
-        for (let r = 0; r < this.rows; r ++ ) {
+        for (let r = 0; r < this.rows; r++) {
             g[r][0] = g[r][this.cols - 1] = true;
         }
 
-        for (let c = 0; c < this.cols; c ++ ) {
+        for (let c = 0; c < this.cols; c++) {
             g[0][c] = g[this.rows - 1][c] = true;
         }
 
         // 创建随机障碍物
-        for (let i = 0; i < this.inner_walls_count / 2; i ++ ) {
-            for (let j = 0; j < 1000; j ++ ) {
+        for (let i = 0; i < this.inner_walls_count / 2; i++) {
+            for (let j = 0; j < 1000; j++) {
                 let r = parseInt(Math.random() * this.rows);
                 let c = parseInt(Math.random() * this.cols);
                 if (g[r][c] || g[this.rows - 1 - r][this.cols - 1 - c]) continue;
-                if (r == this.rows - 2 && c == 1 || r == 1 && c == this.cols - 2)
+                if (r == this.rows - 2 && c == 1 || r == 1 && c == this.cols - 2) // 避免把两条蛇的起点覆盖了
                     continue;
 
                 g[r][c] = g[this.rows - 1 - r][this.cols - 1 - c] = true;
@@ -72,8 +72,8 @@ export class GameMap extends AcGameObject {
         if (!this.check_connectivity(copy_g, this.rows - 2, 1, 1, this.cols - 2))
             return false;
 
-        for (let r = 0; r < this.rows; r ++ ) {
-            for (let c = 0; c < this.cols; c ++ ) {
+        for (let r = 0; r < this.rows; r++) {
+            for (let c = 0; c < this.cols; c++) {
                 if (g[r][c]) {
                     this.walls.push(new Wall(r, c, this));
                 }
@@ -83,7 +83,7 @@ export class GameMap extends AcGameObject {
         return true;
     }
 
-    add_listening_events() {
+    add_listening_events() { // 获取键盘输入，设置两条蛇的行动方向
         this.ctx.canvas.focus();
 
         const [snake0, snake1] = this.snakes;
@@ -100,10 +100,10 @@ export class GameMap extends AcGameObject {
     }
 
     start() {
-        for (let i = 0; i < 1000; i ++ ) 
+        for (let i = 0; i < 1000; i++)
             if (this.create_walls())
                 break;
-        
+
         this.add_listening_events();
     }
 
@@ -157,10 +157,10 @@ export class GameMap extends AcGameObject {
         this.render();
     }
 
-    render() {
+    render() { // 渲染函数：画出深绿色和浅绿色相间的方块
         const color_even = "#AAD751", color_odd = "#A2D149";
-        for (let r = 0; r < this.rows; r ++ ) {
-            for (let c = 0; c < this.cols; c ++ ) {
+        for (let r = 0; r < this.rows; r++) {
+            for (let c = 0; c < this.cols; c++) {
                 if ((r + c) % 2 == 0) {
                     this.ctx.fillStyle = color_even;
                 } else {

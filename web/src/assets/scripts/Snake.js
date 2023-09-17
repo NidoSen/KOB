@@ -53,20 +53,20 @@ export class Snake extends AcGameObject {
         return false;
     }
 
-    next_step() {  // 将蛇的状态变为走下一步
+    next_step() {  // 将蛇的状态变为走下一步（但还没开始走，等update_move才开始走）
         const d = this.direction;
-        this.next_cell = new Cell(this.cells[0].r + this.dr[d], this.cells[0].c + this.dc[d]);
+        this.next_cell = new Cell(this.cells[0].r + this.dr[d], this.cells[0].c + this.dc[d]); //目标位置
         this.eye_direction = d;
         this.direction = -1;  // 清空操作
         this.status = "move";
-        this.step ++ ;
+        this.step++;
 
         const k = this.cells.length;
-        for (let i = k; i > 0; i -- ) {
+        for (let i = k; i > 0; i--) {
             this.cells[i] = JSON.parse(JSON.stringify(this.cells[i - 1]));
         }
 
-        if (!this.gamemap.check_valid(this.next_cell)) { //下一步操作撞了，蛇瞬间去世
+        if (!this.gamemap.check_valid(this.next_cell)) { //下一步操作撞了，蛇瞬间去世，且可以在蛇移动前完成
             this.status = "die";
         }
     }
@@ -91,7 +91,7 @@ export class Snake extends AcGameObject {
 
             if (!this.check_tail_increasing()) {
                 const k = this.cells.length;
-                const tail = this.cells[k - 1], tail_target = this.cells[k - 2];
+                const tail = this.cells[k - 1], tail_target = this.cells[k - 2]; // 最后一个点应该同时向倒数第二个点移动
                 const tail_dx = tail_target.x - tail.x;
                 const tail_dy = tail_target.y - tail.y;
                 tail.x += move_distance * tail_dx / distance;
@@ -101,16 +101,16 @@ export class Snake extends AcGameObject {
     }
 
     update() { //每一帧执行一次
-        if (this.status === 'move') {
+        if (this.status === 'move') { // 先执行next_step，再执行update_move
             this.update_move();
         }
         this.render();
     }
 
-    render() {
+    render() { // 画出蛇的身体和眼睛
         const L = this.gamemap.L;
         const ctx = this.gamemap.ctx;
-        
+
         ctx.fillStyle = this.color;
         if (this.status === "die") {
             ctx.fillStyle = "white";
