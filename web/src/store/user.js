@@ -7,10 +7,11 @@ export default {
         photo: "",
         token: "",
         is_login: false,
+        pulling_info: true, // 是否正在拉取信息
     },
     getters: {
     },
-    mutations: {
+    mutations: { // 使用mutations里的函数需要用commit；放同步操作
         updateUser(state, user) {
             state.id = user.id;
             state.username = user.username;
@@ -26,9 +27,12 @@ export default {
             state.photo = "";
             state.token = "";
             state.is_login = false;
+        },
+        updatePullingInfo(state, pulling_info) {
+            state.pulling_info = pulling_info;
         }
     },
-    actions: {
+    actions: { // 使用actions里的函数需要用dispatch；放异步操作
         login(context, data) {
             $.ajax({
                 url: "http://127.0.0.1:3000/user/account/token/",
@@ -39,6 +43,7 @@ export default {
                 },
                 success(resp) {
                     if (resp.error_message === "success") {
+                        localStorage.setItem("jwt_token", resp.token); // 将token存到浏览器的硬盘空间里实现持久化
                         context.commit("updateToken", resp.token);
                         data.success(resp);
                     }
@@ -73,6 +78,7 @@ export default {
             })
         },
         logout(context) {
+            localStorage.removeItem("jwt_token");
             context.commit("logout");
         }
     },

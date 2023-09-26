@@ -11,7 +11,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class User {
     @TableId(type = IdType.AUTO)
-    private Integer id;
+    private Integer id; // 不使用int避免Mybait-plus出错
     private String username;
     private String password;
     private String photo;

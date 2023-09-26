@@ -13,7 +13,7 @@ import java.util.Date;
 import java.util.UUID;
 
 @Component
-public class JwtUtil {
+public class JwtUtil { // 第一个作用是将字符串加上秘钥和有效期变成加密后的字符串；第二个作用是给令牌，将userId解析出来
     public static final long JWT_TTL = 60 * 60 * 1000L * 24 * 14;  // 有效期14天
     public static final String JWT_KEY = "SDFGjhdsfalshdfHFdsjkdsfds121232131afasdfac";
 
