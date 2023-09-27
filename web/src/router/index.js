@@ -43,7 +43,7 @@ const routes = [
     }
   },
   {
-    path: "/user/bot",
+    path: "/user/bot/",
     name: "user_bot_index",
     component: UserBotIndexView,
     meta: {
