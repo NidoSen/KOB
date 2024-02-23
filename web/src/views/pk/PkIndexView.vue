@@ -1,18 +1,70 @@
 <template>
-    <div>
-        <PlayGround />
-    </div>
+  <div>
+    <PlayGround v-if="$store.state.pk.status === 'playing'" />
+    <MatchGround v-if="$store.state.pk.status === 'matching'" />
+  </div>
 </template>
 
 <script>
-import PlayGround from '../../components/PlayGround.vue'
+import PlayGround from "../../components/PlayGround.vue";
+import MatchGround from "../../components/MatchGround.vue";
+import { onMounted, onUnmounted } from "vue"; //一个是组件挂载完毕，一个是组件销毁前
+import { useStore } from "vuex";
 
 export default {
-    components: {
-        PlayGround
-    }
-}
+  components: {
+    PlayGround,
+    MatchGround,
+  },
+  setup() {
+    const store = useStore();
+    const socketUrl = `ws://127.0.0.1:3000/websocket/${store.state.user.token}/`; //注意这里是`不是单引号'
+
+    let socket = null;
+    //挂载完成，创建一个连接
+    onMounted(() => {
+      store.commit("updateOpponent", {
+        username: "我的对手",
+        photo:
+          "https://cdn.acwing.com/media/article/image/2022/08/09/1_1db2488f17-anonymous.png",
+      });
+      socket = new WebSocket(socketUrl);
+
+      //建立连接的时候
+      socket.onopen = () => {
+        console.log("connected!");
+        store.commit("updateSocket", socket);
+      };
+
+      //接收到信息的时候
+      socket.onmessage = (msg) => {
+        //msg的格式是框架定义的
+        const data = JSON.parse(msg.data);
+        if (data.event === "start-matching") {
+          store.commit("updateOpponent", {
+            username: data.opponent_username,
+            photo: data.opponent_photo,
+          });
+          setTimeout(() => {
+            store.commit("updateStatus", "playing");
+          }, 2000);
+          store.commit("updateGamemap", data.gamemap);
+        }
+      };
+
+      //关闭的时候
+      socket.onclose = () => {
+        //卸载的时候一定要断开，否则会产生冗余连接
+        console.log("disconnected!");
+      };
+    });
+
+    onUnmounted(() => {
+      socket.close();
+      store.commit("updateStatus", "matching");
+    });
+  },
+};
 </script>
 
-<style scoped>
-</style>
+<style scoped></style>
