@@ -3517,9 +3517,9 @@ public class Bot {
 
 ## 6. 实现微服务：匹配系统
 
-### 第1部分代码仓库地址
+### *第1部分代码仓库地址*
 
-待补充
+https://github.com/NidoSen/KOB/tree/06f15b69e0a832546405f36580b49c0579b9bc32
 
 ### 6.1 WebSocket和游戏逻辑
 
@@ -4379,5 +4379,1095 @@ export class GameMap extends AcGameObject {
 }
 ```
 
+### *第2部分代码仓库地址*
 
+当前页面就是
+
+### 6.6 完善信息
+
+为了实现游戏同步，除了游戏地图，还需要记录用户ID，用户控制的蛇的位置，蛇走过的位置
+
+- 需要新增一个类Player
+
+  ```java
+  @Data
+  @NoArgsConstructor
+  @AllArgsConstructor
+  public class Player {
+      private Integer id;
+      private Integer sx;
+      private Integer sy;
+      private List<Integer> steps;
+  }
+
+- 需要更新Game类和startMatching函数
+
+  ```java
+  package com.kob.backend.consumer.utils;
+  
+  import java.util.ArrayList;
+  import java.util.Random;
+  
+  public class Game {
+      private final Integer rows;
+      private final Integer cols;
+      private final Integer inner_walls_count;
+      private final int[][] g;
+      private final static int[] dx = {-1, 0, 1, 0}, dy = {0, 1, 0, -1};
+      //新增两个内部变量，分别代表参与游戏的两名玩家
+      private final Player playerA, playerB;
+      
+      //构造函数新增两个参数idA和idB，分别是两名玩家的用户ID
+      public Game(Integer rows, Integer cols, Integer inner_walls_count, Integer idA, Integer idB) {
+          this.rows = rows;
+          this.cols = cols;
+          this.inner_walls_count = inner_walls_count;
+          this.g = new int[rows][cols];
+          //更新两名玩家控制的蛇的初始位置，A玩家在左下角，B玩家在右上角
+          this.playerA = new Player(idA, rows - 2, 1, new ArrayList<>());
+          this.playerB = new Player(idB, 1, cols - 1, new ArrayList<>());
+      }
+  
+      public int[][] getG() {
+          return g;
+      }
+      
+      //获取A玩家变量的函数
+      public Player getPlayerA() {
+          return this.playerA;
+      }
+      
+      //获取B玩家变量的函数
+      public Player getPlayerB() {
+          return this.playerB;
+      }
+      
+      ...
+  }
+  ```
+
+  ```java
+  ...
+  
+  @Component
+  @ServerEndpoint("/websocket/{token}")  // 注意不要以'/'结尾
+  public class WebSocketServer {
+      ...
+  
+      private void startMachting() {
+          System.out.println("start matching");
+          matchpool.add(this.user);
+  
+          //目前还未考虑线程安全问题，只作为测试使用，后续会更换
+          while (matchpool.size() >= 2) {
+              ...
+              
+              //新增JSON对象，记录游戏地图和玩家信息
+              JSONObject respGame = new JSONObject();
+              respGame.put("a_id", game.getPlayerA().getId());
+              respGame.put("a_sx", game.getPlayerA().getSx());
+              respGame.put("a_sy", game.getPlayerA().getSy());
+              respGame.put("b_id", game.getPlayerB().getId());
+              respGame.put("b_sx", game.getPlayerB().getSx());
+              respGame.put("b_sy", game.getPlayerB().getSy());
+              respGame.put("map", game.getG());
+  
+              JSONObject respA = new JSONObject();
+              respA.put("event", "start-matching");
+              respA.put("opponent_username", b.getUsername());
+              respA.put("opponent_photo", b.getPhoto());
+              respA.put("game", respGame); //原来是传游戏地图的，现在改为传整个游戏的信息
+              users.get(a.getId()).sendMessage(respA.toJSONString());
+  
+              JSONObject respB = new JSONObject();
+              respB.put("event", "start-matching");
+              respB.put("opponent_username", a.getUsername());
+              respB.put("opponent_photo", a.getPhoto());
+              respB.put("game", respGame); //原来是传游戏地图的，现在改为传整个游戏的信息
+              users.get(b.getId()).sendMessage(respB.toJSONString());
+          }
+      }
+  
+      ...
+  }
+
+- 前端原本只接收地图数据，现在多了玩家数据，因此需要修改pk.js和PkIndexView.vue
+
+  ```js
+  export default {
+      state: {
+          ...
+          gamemap: null,
+          a_id: 0,
+          a_sx: 0,
+          a_sy: 0,
+          b_id: 0,
+          b_sx: 0,
+          b_sy: 0,
+      },
+      ...
+      mutations: {
+          ...
+          updateGame(state, game) { //原来是updateGamemap，现在是整个游戏的信息，因此改为updateGame
+              state.gamemap = game.map;
+              state.a_id = game.a_id;
+              state.a_sx = game.a_sx;
+              state.a_sy = game.a_sy;
+              state.b_id = game.b_id;
+              state.b_sx = game.b_sx;
+              state.b_sy = game.b_sy;
+          }
+      },
+      ...
+  }
+  ```
+
+  ```vue
+  <template>
+    <div>
+      <PlayGround v-if="$store.state.pk.status === 'playing'" />
+      <MatchGround v-if="$store.state.pk.status === 'matching'" />
+    </div>
+  </template>
+  
+  <script>
+  import PlayGround from "../../components/PlayGround.vue";
+  import MatchGround from "../../components/MatchGround.vue";
+  import { onMounted, onUnmounted } from "vue"; //一个是组件挂载完毕，一个是组件销毁前
+  import { useStore } from "vuex";
+  
+  export default {
+    components: {
+      PlayGround,
+      MatchGround,
+    },
+    setup() {
+      ...
+        //接收到信息的时候
+        socket.onmessage = (msg) => {
+          //msg的格式是框架定义的
+          const data = JSON.parse(msg.data);
+          if (data.event === "start-matching") {
+            store.commit("updateOpponent", {
+              username: data.opponent_username,
+              photo: data.opponent_photo,
+            });
+            setTimeout(() => {
+              store.commit("updateStatus", "playing");
+            }, 2000);
+            store.commit("updateGame", data.game); //更新整个游戏的信息
+          }
+        };
+  
+        ...
+    },
+  };
+  </script>
+  
+  <style scoped></style>
+```
+
+### 6.7 多线程同步和游戏实现
+
+game本身需要接收来自两个用户websocket线程的异步交互数据，因此game需要支持多线程操作，而两个用户线程发送的异步游戏数据为蛇的移动操作（nextStep），因此需要在大圈里实现对这一数据的多线程读写
+
+<img src="myResources\6.4 游戏多线程.png" style="zoom:50%;" />
+
+- 首先需要把Game类改成支持多线程，并增加run函数（后面要重写）
+
+  ```java
+  ...
+  
+  public class Game extends Thread { //继承自线程类Thread
+      ...
+      
+      @Override
+      public void run() { //新线程的入口函数
+          super.run();
+      }
+  }
+  ```
+
+- 修改WebSocketServer类，将用户websocket线程和game线程对应起来
+
+  ```java
+  ...
+  
+  @Component
+  @ServerEndpoint("/websocket/{token}")  // 注意不要以'/'结尾
+  public class WebSocketServer {
+      ...
+  
+      //记录当前对象（线程）的game
+      private Game game;
+  
+     ...
+  
+      private void startMachting() {
+          System.out.println("start matching");
+          matchpool.add(this.user);
+  
+          //目前还未考虑线程安全问题，只作为测试使用，后续会更换
+          while (matchpool.size() >= 2) {
+              Iterator<User> it = matchpool.iterator();
+              User a = it.next(), b = it.next();
+              matchpool.remove(a);
+              matchpool.remove(b);
+  
+              Game game = new Game(13, 14, 20, a.getId(), b.getId());
+              game.createMap();
+              game.start(); //新开线程
+              
+              //记录两个玩家的游戏
+              users.get(a.getId()).game = game;
+              users.get(b.getId()).game = game;
+  
+              ...
+          }
+      }
+  
+      ...
+  }
+  ```
+
+- 实现上面图里的循环，右边线程会修改两个变量的值，左边线程会读取两个变量（nextStepA和nextStepB）的值，需要对读写进行上锁
+
+  ```java
+  ...
+  
+  public class Game extends Thread {
+      ...
+      //记录当前游戏两名玩家的操作
+      private Integer nextStepA = null;
+      private Integer nextStepB = null;
+      //互斥锁，控制多线程对nextStepA和nextStepB的读和写
+      private ReentrantLock lock = new ReentrantLock();
+      private String status = "playing"; //playing -> finished
+      private String loser = ""; //all：平局 A：A输 B：B输
+  
+      ...
+  
+      public void setNextStepA(Integer nextStepA) { //对nextStepA的写需要上锁
+          lock.lock();
+          try {
+              this.nextStepA = nextStepA;
+          } finally {
+              lock.unlock();
+          }
+      }
+  
+      public void setNextStepB(Integer nextStepB) { //对nextStepB的写需要上锁
+          lock.lock();
+          try {
+              this.nextStepB = nextStepB;
+          } finally {
+              lock.unlock();
+          }
+      }
+  
+      ...
+  
+      private boolean nextStep() { //等待两名玩家的下一步操作
+          try {
+              //先睡200ms（前端每秒5步），因为前端蛇的移动是等当前移动完，根据当前时间点的数据继续移动，
+              //所以如果后端nextStep过快，则会导致传到前端的数据，其中有几次在两次移动中间的，会被覆盖掉
+              //因此加上sleep可以避免这种情况
+              Thread.sleep(200);
+          } catch (InterruptedException e) {
+              e.printStackTrace();
+          }
+          for (int i = 0; i < 5; i++) {
+              try {
+                  Thread.sleep(1000);
+                  lock.lock();
+                  try {
+                      if (nextStepA != null && nextStepB != null) { //如果两名玩家的操作都拿到了
+                          playerA.getSteps().add(nextStepA);
+                          playerB.getSteps().add(nextStepB);
+                          return true;
+                      }
+                  } finally {
+                      lock.unlock();
+                  }
+              } catch (InterruptedException e) {
+                  e.printStackTrace();
+              }
+          }
+  
+          return false;
+      }
+  
+      private void judge() { //判断两名玩家下一步操作是否合法
+          //待实现
+      }
+  
+      private void sendMove() { //向两个Client传递移动信息
+          //待实现
+      }
+  
+      private void sendResult() { //对两个client发送结果
+          //待实现
+      }
+  
+      @Override
+      public void run() { //新线程的入口函数
+          for (int i = 0; i < 1000; i++) { //根据地图大小，1000步以内一定能够会结束游戏
+              if (nextStep()) { //是否获取两条蛇的下一步操作
+                  judge(); //判断操作是否合法
+                  if (status.equals("playing")) { //如果操作合法，那么就往前端发送消息，在前端更新蛇的图画
+                      sendMove();
+                  }
+              } else {
+                  this.status = "finished"; //游戏结束
+                  lock.lock();
+                  try {
+                      if (nextStepA == null && nextStepB == null) { //平局
+                          loser = "all";
+                      } else if (nextStepA == null) {
+                          loser = "A";
+                      } else if (nextStepB == null) {
+                          loser = "B";
+                      } else {
+                          loser = "all";
+                      }
+                  } finally {
+                      lock.unlock();
+                  }
+                  sendResult(); //将游戏结果发给前端
+                  break;
+              }
+          }
+      }
+  }
+
+- 完成sendMove和sendResult，即后端将蛇的移动数据和游戏结果发给前端，给前端的渲染做准备
+
+  ```java
+  ...
+  
+  public class Game extends Thread {
+      ...
+  
+      private void sendMessage(String message) {
+          WebSocketServer.users.get(playerA.getId()).sendMessage(message);
+          WebSocketServer.users.get(playerB.getId()).sendMessage(message);
+      }
+  
+      private void sendMove() { //向两个Client传递移动信息
+          JSONObject resp = new JSONObject();
+          lock.lock();
+          try {
+              resp.put("event", "move");
+              resp.put("a_direction", nextStepA);
+              resp.put("b_direction", nextStepB);
+              this.sendMessage(resp.toJSONString());
+          } finally {
+              lock.unlock();
+          }
+      }
+  
+      private void sendResult() { //对两个client发送结果
+          JSONObject resp = new JSONObject();
+          resp.put("event", "result");
+          resp.put("loser", loser);
+          this.sendMessage(resp.toJSONString());
+      }
+  
+      ...
+  }
+
+- 修改前端的GameMap.js，用户在键盘上输入wasd后，前端会给后端发送消息；修改后端的WebSocketServer类，实现接收前端消息并修改nextStep（到这里实现了前后端数据的多线程交互）
+
+  ```js
+  ...
+  
+  export class GameMap extends AcGameObject {
+      ...
+  
+      add_listening_events() { // 获取键盘输入，设置两条蛇的行动方向
+          this.ctx.canvas.focus();
+  
+          this.ctx.canvas.addEventListener("keydown", e => {
+              //因为现在用户只控制自己的蛇，因此只需要wasd而不需要上座左右了
+              let d = -1
+              if (e.key === 'w') d = 0;
+              else if (e.key === 'd') d = 1;
+              else if (e.key === 's') d = 2;
+              else if (e.key === 'a') d = 3;
+  
+              if (d >= 0) { // 如果是一个合法的操作，就向后端发送消息
+                  this.store.state.pk.socket.send(JSON.stringify({
+                      event: "move",
+                      direction: d,
+                  }))
+              }
+          });
+      }
+  
+      ...
+  }
+  ```
+  
+  ```java
+  ...
+  
+  @Component
+  @ServerEndpoint("/websocket/{token}")  // 注意不要以'/'结尾
+  public class WebSocketServer {
+      ...
+          
+      //修改nextStep
+      private void move(int direction) {
+          if (game.getPlayerA().getId() == user.getId()) {
+              game.setNextStepA(direction);
+          } else if (game.getPlayerB().getId() == user.getId()) {
+              game.setNextStepB(direction);
+          }
+      }
+  
+      @OnMessage
+      public void onMessage(String message, Session session) {
+          // 从Client接收消息
+          System.out.println("receive message");
+  
+          JSONObject data = JSONObject.parseObject(message);
+          String event = data.getString("event");
+          if ("start-matching".equals(event)) {
+              startMachting();
+          } else if ("stop-matching".equals(event)) {
+              stopMatching();
+          } else if ("move".equals(event)) { //当前端发来的事件为移动事件时，需要修改nextStep
+              move(Integer.parseInt(data.getString("direction")));
+          }
+      }
+  
+      ...
+  }
+  
+- 完善前端对蛇移动和游戏结果的更新，需要修改pk.js和GameMap.vue将整个game存到store中，修改PkIndexView.vue，实现前端对move和result事件的接收，修改Sanke.js，移除前端对蛇生死的判断（交给后端实现）
+
+  pk.js
+
+  ```js
+  export default {
+      state: {
+          ...
+          gameObject: null, //存储游戏
+      },
+      getters: {
+  
+      },
+      mutations: {
+          ...
+          updateGameObject(state, gameObject) {
+              state.gameObject = gameObject;
+          }
+      },
+      modules: {}
+  }
+  ```
+
+  GameMap.vue
+
+  ```vue
+  ...
+  
+  <script>
+  import { GameMap } from "@/assets/scripts/GameMap";
+  import { ref, onMounted } from "vue";
+  import { useStore } from "vuex";
+  
+  export default {
+    setup() {
+      ...
+  
+      onMounted(() => {
+        store.commit(
+          "updateGameObject",
+          new GameMap(canvas.value.getContext("2d"), parent.value, store)
+        );
+      });
+  
+      ...
+    },
+  };
+  </script>
+  
+  ...
+  ```
+
+  PkIndexView.vue
+
+  ```vue
+  ...
+  
+  <script>
+  import PlayGround from "../../components/PlayGround.vue";
+  import MatchGround from "../../components/MatchGround.vue";
+  import { onMounted, onUnmounted } from "vue"; //一个是组件挂载完毕，一个是组件销毁前
+  import { useStore } from "vuex";
+  
+  export default {
+    ...
+  
+        //接收到信息的时候
+        socket.onmessage = (msg) => {
+          //msg的格式是框架定义的
+          const data = JSON.parse(msg.data);
+          if (data.event === "start-matching") {
+            store.commit("updateOpponent", {
+              username: data.opponent_username,
+              photo: data.opponent_photo,
+            });
+            setTimeout(() => {
+              store.commit("updateStatus", "playing");
+            }, 2000);
+            store.commit("updateGame", data.game);
+          } else if (data.event === "move") { //事件为move，需要在前端渲染蛇的移动
+            console.log(data);
+            const game = store.state.pk.gameObject;
+            const [snake0, snake1] = game.snakes;
+            snake0.set_direction(data.a_direction);
+            snake1.set_direction(data.b_direction);
+          } else if (data.event === "result") { //事件为result，需要在前端渲染游戏结果
+            console.log(data);
+            const game = store.state.pk.gameObject;
+            const [snake0, snake1] = game.snakes;
+            if (data.loser === "all" || data.loser === "A") {
+              snake0.stauts = "die";
+            }
+            if (data.loser === "all" || data.loser === "B") {
+              snake1.stauts = "die";
+            }
+          }
+        };
+  
+        ...
+    },
+  };
+  </script>
+  
+  <style scoped></style>
+  ```
+
+  Snake.js
+
+  ```js
+  ...
+  
+  export class Snake extends AcGameObject {
+      ...
+  
+      next_step() { // 将蛇的状态变为走下一步（但还没开始走，等update_move才开始走）
+          const d = this.direction;
+          this.next_cell = new Cell(this.cells[0].r + this.dr[d], this.cells[0].c + this.dc[d]); //目标位置
+          this.eye_direction = d;
+          this.direction = -1; // 清空操作
+          this.status = "move";
+          this.step++;
+  
+          const k = this.cells.length;
+          for (let i = k; i > 0; i--) {
+              this.cells[i] = JSON.parse(JSON.stringify(this.cells[i - 1]));
+          }
+  
+          // 交给后端
+          // if (!this.gamemap.check_valid(this.next_cell)) { //下一步操作撞了，蛇瞬间去世，且可以在蛇移动前完成
+          //     this.status = "die";
+          // }
+      }
+  
+      ...
+  }
+
+- 完善后端对蛇移动合法性的判断，目前Game类的judge函数还没实现，只有在一方没输入时游戏才会结束，而蛇撞墙不会导致游戏结束，为了实现这一功能，需要新增一个蛇身类Cell，并修改Player类实现重新得到蛇身，最后完善judge函数
+
+  Cell
+
+  ```java
+  ...
+  
+  @Data
+  @NoArgsConstructor
+  @AllArgsConstructor
+  public class Cell {
+      int x, y;
+  }
+  ```
+
+  Player
+
+  ```java
+  ...
+  
+  @Data
+  @NoArgsConstructor
+  @AllArgsConstructor
+  public class Player {
+      ...
+  
+      private boolean check_tail_increasing(int step) { //检测当前回合蛇的长度是否增加
+          return step <= 10 || step % 3 == 1;
+      }
+  
+      public List<Cell> getCells() { //重建蛇
+          List<Cell> res = new ArrayList<>();
+  
+          int[] dx = {-1, 0, 1, 0}, dy = {0, 1, 0, -1};
+          int x = sx, y = sy;
+          int step = 0;
+          res.add(new Cell(x, y)); //起始位置
+          for (int d: steps) {
+              x += dx[d];
+              y += dy[d];
+              res.add(new Cell(x, y)); //增加一节蛇身
+              //如果蛇身没有变长，就去掉最后一个点（对应的是0位置处的Cell，下标最大的Cell始终记录舌头位置）
+              if (!check_tail_increasing(++step)) {
+                  res.remove(0);
+              }
+          }
+          return res;
+      }
+  }
+  ```
+
+  Game
+
+  ```java
+  ...
+  
+  public class Game extends Thread {
+      ...
+          
+      //判断A蛇是否死亡（注意这里的A和B与用户A和B并不对应）
+      private boolean check_valid(List<Cell> cellsA, List<Cell> cellsB) {
+          int n = cellsA.size();
+          Cell cell = cellsA.get(n - 1);
+          if (g[cell.x][cell.y] == 1) { //撞墙了
+              return false;
+          }
+  
+          //蛇头撞到自己了
+          for (int i = 0; i < n - 1; i ++ ) {
+              if (cellsA.get(i).x == cell.x && cellsA.get(i).y == cell.y) {
+                  return false;
+              }
+          }
+  
+          //蛇头撞到另一条蛇了
+          for (int i = 0; i < n - 1; i ++ ) {
+              if (cellsB.get(i).x == cell.x && cellsB.get(i).y == cell.y) {
+                  return false;
+              }
+          }
+  
+          return true;
+      }
+  
+      private void judge() { //判断两名玩家下一步操作是否合法
+          List<Cell> cellsA = playerA.getCells();
+          List<Cell> cellsB = playerB.getCells();
+          boolean validA = check_valid(cellsA, cellsB); //判断A蛇是否死亡
+          boolean validB = check_valid(cellsB, cellsA); //判断B蛇是否死亡
+          if (!validA || !validB) { //只要A和B有一个输掉了，就结束游戏
+              status = "finished";
+              if (!validA && !validB) {
+                  loser = "all";
+              } else if (!validA) {
+                  loser = "A";
+              } else {
+                  loser = "B";
+              }
+          }
+      }
+  
+      ...
+  
+      @Override
+      public void run() { //新线程的入口函数
+          for (int i = 0; i < 1000; i++) { //根据地图大小，1000步以内一定能够会结束游戏
+              if (nextStep()) { //是否获取两条蛇的下一步操作
+                  System.out.println("aaa");
+                  judge();
+                  if (status.equals("playing")) {
+                      sendMove();
+                  } else { //操作非法，说明游戏结束了
+                      sendResult();
+                      break;
+                  }
+              } else {
+                  ...
+              }
+          }
+      }
+  }
+  ```
+
+### 6.8 游戏结算界面
+
+首先是输赢的显示，新建一个组件ResultBoard.vue来专门显示结算界面，同时为了判断谁输谁赢，必须把loser也记录下来，且需要在Pk页面显示ResultBoard.vue组件，所以还需要修改pk.js
+
+pk.js
+
+```js
+export default {
+    state: {
+        ...
+        loser: "none", //none, all, A, B
+    },
+    getters: {
+
+    },
+    mutations: {
+        ...
+        updateLoser(state, loser) {
+            state.loser = loser;
+        }
+    },
+    modules: {}
+}
+```
+
+PkIndexView.vue
+
+```vue
+<template>
+  <div>
+    <PlayGround v-if="$store.state.pk.status === 'playing'" />
+    <MatchGround v-if="$store.state.pk.status === 'matching'" />
+    <ResultBoard v-if="$store.state.pk.loser !== 'none'" />
+  </div>
+</template>
+
+<script>
+import PlayGround from "../../components/PlayGround.vue";
+import MatchGround from "../../components/MatchGround.vue";
+import ResultBoard from "../../components/ResultBoard.vue";
+import { onMounted, onUnmounted } from "vue"; //一个是组件挂载完毕，一个是组件销毁前
+import { useStore } from "vuex";
+
+export default {
+  components: {
+    PlayGround,
+    MatchGround,
+    ResultBoard,
+  },
+  setup() {
+    ...
+
+      //接收到信息的时候
+      socket.onmessage = (msg) => {
+        //msg的格式是框架定义的
+        const data = JSON.parse(msg.data);
+        if (data.event === "start-matching") {
+          ...
+        } else if (data.event === "move") {
+          ...
+        } else if (data.event === "result") {
+          ...
+          store.commit("updateLoser", data.loser); //更新store中的loser
+        }
+      };
+
+      ...
+  },
+};
+</script>
+
+<style scoped></style>
+```
+
+ResultBoard.vue
+
+```vue
+<template>
+  <div class="result-board">
+    <div class="result-board-text" v-if="$store.state.pk.loser === 'all'">
+      Draw
+    </div>
+    <!-- 判断的第二个条件必须写==而不是====，因为类型不一样 -->
+    <div
+      class="result-board-text"
+      v-else-if="
+        $store.state.pk.loser === 'A' &&
+        $store.state.pk.a_id == $store.state.user.id
+      "
+    >
+      Lose
+    </div>
+    <!-- 判断的第二个条件必须写==而不是====，因为类型不一样 -->
+    <div
+      class="result-board-text"
+      v-else-if="
+        $store.state.pk.loser === 'B' &&
+        $store.state.pk.b_id == $store.state.user.id
+      "
+    >
+      Lose
+    </div>
+    <div class="result-board-text" v-else>Win</div>
+    <div class="result-board-btn">
+      <button type="button" class="btn btn-warning btn-lg">再来</button>
+    </div>
+  </div>
+</template>
+
+<script></script>
+
+<style scoped>
+div.result-board {
+  height: 30vh;
+  width: 30vw;
+  background-color: rgba(50, 50, 50, 0.5);
+  position: absolute;
+  top: 30vh;
+  left: 35vw;
+}
+div.result-board-text {
+  text-align: center;
+  color: white;
+  font-size: 50px;
+  font-weight: 600;
+  font-style: italic;
+  padding-top: 5vh;
+}
+div.result-board-btn {
+  text-align: center;
+  padding-top: 2vh;
+}
+</style>
+```
+
+下一步是继续修改ResultBoard.vue，实现重来按钮
+
+```vue
+<template>
+  <div class="result-board">
+    ...
+    <div class="result-board-text" v-else>Win</div>
+    <div class="result-board-btn">
+      <button @click="restart" type="button" class="btn btn-warning btn-lg">
+        再来
+      </button>
+    </div>
+  </div>
+</template>
+
+<script>
+import { useStore } from "vuex";
+
+export default {
+  setup() {
+    const store = useStore();
+
+    const restart = () => {
+      store.commit("updateStatus", "matching");
+      store.commit("updateLoser", "none");
+    };
+
+    return {
+      restart,
+    };
+  },
+};
+</script>
+
+<style scoped>
+...
+</style>
+```
+
+### 6.9 存储对局记录
+
+首先需要创建对应的数据库
+
+```mysql
+CREATE TABLE `kob`.`record`  (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `a_id` int NULL,
+  `a_sx` int NULL,
+  `a_sy` int NULL,
+  `b_id` int NULL,
+  `b_sx` int NULL,
+  `b_sy` int NULL,
+  `a_steps` varchar(1000) NULL,
+  `b_steps` varchar(1000) NULL,
+  `map` varchar(1000) NULL,
+  `loser` varchar(10) NULL,
+  `createtime` datetime NULL,
+  PRIMARY KEY (`id`)
+);
+```
+
+```mysql
+ALTER TABLE `kob`.`user` 
+ADD COLUMN `rating` int NULL DEFAULT 1500 AFTER `photo`;
+```
+
+```mysql
+ALTER TABLE `kob`.`bot` 
+DROP COLUMN `rating`;
+```
+
+pojo层新建Record类
+
+```java
+...
+
+@Data
+@AllArgsConstructor
+@NoArgsConstructor
+public class Record {
+    @TableId(type = IdType.AUTO)
+    private Integer id;
+    private Integer aId;
+    private Integer aSx;
+    private Integer aSy;
+    private Integer bId;
+    private Integer bSx;
+    private Integer bSy;
+    private String aSteps;
+    private String bSteps;
+    private String map;
+    private String loser;
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "Asia/Shanghai")
+    private Date createtime;
+}
+```
+
+mapper层新建RecordMapper.java
+
+```java
+...
+
+@Mapper
+public interface RecordMapper extends BaseMapper<Record> {
+
+}
+```
+
+修改WebSocketServer.java，player.java和Game.java，实现存储对局结果
+
+WebSocketServer.java（新建RecordMapper用于使用Mybatis-plus）
+
+```java
+...
+
+@Component
+@ServerEndpoint("/websocket/{token}")  // 注意不要以'/'结尾
+public class WebSocketServer {
+    ...
+    
+    public static RecordMapper recordMapper;
+
+    ...
+
+    @Autowired
+    public void setRecordMapper(RecordMapper recordMapper) {
+        WebSocketServer.recordMapper = recordMapper;
+    }
+
+    ...
+}
+```
+
+Player.java
+
+```java
+...
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class Player {
+    ...
+
+    //将steps转化为字符串，用于存储到数据库
+    public String getStepsString() {
+        StringBuilder res = new StringBuilder();
+        for (int d: steps) {
+            res.append(d);
+        }
+        return res.toString();
+    }
+}
+```
+
+Game.java
+
+```java
+...
+
+public class Game extends Thread {
+    ...
+
+    //将map转化为字符串，用于存储到数据库
+    private String getMapString() {
+        StringBuilder res = new StringBuilder();
+        for (int i = 0; i < rows; i ++ ) {
+            for (int j = 0; j < cols; j ++ ) {
+                res.append(g[i][j]);
+            }
+        }
+        return res.toString();
+    }
+    
+    //将对局记录存储到数据库
+    private void saveToDatabase() {
+        Record record = new Record(
+                null,
+                playerA.getId(),
+                playerA.getSx(),
+                playerA.getSy(),
+                playerB.getId(),
+                playerB.getSx(),
+                playerB.getSy(),
+                playerA.getStepsString(),
+                playerB.getStepsString(),
+                getMapString(),
+                loser,
+                new Date()
+        );
+
+        WebSocketServer.recordMapper.insert(record);
+    }
+
+    ...
+
+    @Override
+    public void run() { //新线程的入口函数
+        for (int i = 0; i < 1000; i++) { //根据地图大小，1000步以内一定能够会结束游戏
+            if (nextStep()) { //是否获取两条蛇的下一步操作
+                judge();
+                if (status.equals("playing")) {
+                    sendMove();
+                } else {
+                    saveToDatabase();
+                    sendResult();
+                    break;
+                }
+            } else {
+                this.status = "finished";
+                lock.lock();
+                try {
+                    if (nextStepA == null && nextStepB == null) {
+                        loser = "all";
+                    } else if (nextStepA == null) {
+                        loser = "A";
+                    } else if (nextStepB == null) {
+                        loser = "B";
+                    } else {
+                        loser = "all";
+                    }
+                } finally {
+                    lock.unlock();
+                }
+                saveToDatabase();
+                sendResult();
+                break;
+            }
+        }
+    }
+}
+```
 

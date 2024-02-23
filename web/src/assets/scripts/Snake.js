@@ -1,5 +1,9 @@
-import { AcGameObject } from "./AcGameObject";
-import { Cell } from "./Cell";
+import {
+    AcGameObject
+} from "./AcGameObject";
+import {
+    Cell
+} from "./Cell";
 
 export class Snake extends AcGameObject {
     constructor(info, gamemap) {
@@ -53,11 +57,11 @@ export class Snake extends AcGameObject {
         return false;
     }
 
-    next_step() {  // 将蛇的状态变为走下一步（但还没开始走，等update_move才开始走）
+    next_step() { // 将蛇的状态变为走下一步（但还没开始走，等update_move才开始走）
         const d = this.direction;
         this.next_cell = new Cell(this.cells[0].r + this.dr[d], this.cells[0].c + this.dc[d]); //目标位置
         this.eye_direction = d;
-        this.direction = -1;  // 清空操作
+        this.direction = -1; // 清空操作
         this.status = "move";
         this.step++;
 
@@ -66,9 +70,10 @@ export class Snake extends AcGameObject {
             this.cells[i] = JSON.parse(JSON.stringify(this.cells[i - 1]));
         }
 
-        if (!this.gamemap.check_valid(this.next_cell)) { //下一步操作撞了，蛇瞬间去世，且可以在蛇移动前完成
-            this.status = "die";
-        }
+        // 交给后端
+        // if (!this.gamemap.check_valid(this.next_cell)) { //下一步操作撞了，蛇瞬间去世，且可以在蛇移动前完成
+        //     this.status = "die";
+        // }
     }
 
     update_move() {
@@ -91,7 +96,8 @@ export class Snake extends AcGameObject {
 
             if (!this.check_tail_increasing()) {
                 const k = this.cells.length;
-                const tail = this.cells[k - 1], tail_target = this.cells[k - 2]; // 最后一个点应该同时向倒数第二个点移动
+                const tail = this.cells[k - 1],
+                    tail_target = this.cells[k - 2]; // 最后一个点应该同时向倒数第二个点移动
                 const tail_dx = tail_target.x - tail.x;
                 const tail_dy = tail_target.y - tail.y;
                 tail.x += move_distance * tail_dx / distance;
@@ -123,14 +129,14 @@ export class Snake extends AcGameObject {
         }
 
         for (let i = 1; i < this.cells.length; i++) {
-            const a = this.cells[i - 1], b = this.cells[i];
+            const a = this.cells[i - 1],
+                b = this.cells[i];
             if (Math.abs(a.x - b.x) < this.eps && Math.abs(a.y - b.y) < this.eps) {
                 continue;
             }
             if (Math.abs(a.x - b.x) < this.eps) {
                 ctx.fillRect((a.x - 0.4) * L, Math.min(a.y, b.y) * L, L * 0.8, Math.abs(a.y - b.y) * L);
-            }
-            else {
+            } else {
                 ctx.fillRect(Math.min(a.x, b.x) * L, (a.y - 0.4) * L, Math.abs(a.x - b.x) * L, L * 0.8);
             }
         }

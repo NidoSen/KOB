@@ -58,16 +58,19 @@ export class GameMap extends AcGameObject {
     add_listening_events() { // 获取键盘输入，设置两条蛇的行动方向
         this.ctx.canvas.focus();
 
-        const [snake0, snake1] = this.snakes;
         this.ctx.canvas.addEventListener("keydown", e => {
-            if (e.key === 'w') snake0.set_direction(0);
-            else if (e.key === 'd') snake0.set_direction(1);
-            else if (e.key === 's') snake0.set_direction(2);
-            else if (e.key === 'a') snake0.set_direction(3);
-            else if (e.key === 'ArrowUp') snake1.set_direction(0);
-            else if (e.key === 'ArrowRight') snake1.set_direction(1);
-            else if (e.key === 'ArrowDown') snake1.set_direction(2);
-            else if (e.key === 'ArrowLeft') snake1.set_direction(3);
+            let d = -1
+            if (e.key === 'w') d = 0;
+            else if (e.key === 'd') d = 1;
+            else if (e.key === 's') d = 2;
+            else if (e.key === 'a') d = 3;
+
+            if (d >= 0) { // 如果是一个合法的操作，就向后端发送消息
+                this.store.state.pk.socket.send(JSON.stringify({
+                    event: "move",
+                    direction: d,
+                }))
+            }
         });
     }
 
