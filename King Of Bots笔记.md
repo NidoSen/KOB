@@ -4381,7 +4381,7 @@ export class GameMap extends AcGameObject {
 
 ### *第2部分代码仓库地址*
 
-当前页面就是
+https://github.com/NidoSen/KOB/tree/7b67fe52248c9db92d39003b7f2a2d521fc791cb
 
 ### 6.6 完善信息
 
@@ -4586,7 +4586,7 @@ game本身需要接收来自两个用户websocket线程的异步交互数据，�
           super.run();
       }
   }
-  ```
+```
 
 - 修改WebSocketServer类，将用户websocket线程和game线程对应起来
 
@@ -5103,7 +5103,7 @@ game本身需要接收来自两个用户websocket线程的异步交互数据，�
   }
   ```
 
-### 6.8 游戏结算界面
+### 6.7 游戏结算界面
 
 首先是输赢的显示，新建一个组件ResultBoard.vue来专门显示结算界面，同时为了判断谁输谁赢，必须把loser也记录下来，且需要在Pk页面显示ResultBoard.vue组件，所以还需要修改pk.js
 
@@ -5277,7 +5277,7 @@ export default {
 </style>
 ```
 
-### 6.9 存储对局记录
+### 6.8 存储对局记录
 
 首先需要创建对应的数据库
 
@@ -5297,16 +5297,6 @@ CREATE TABLE `kob`.`record`  (
   `createtime` datetime NULL,
   PRIMARY KEY (`id`)
 );
-```
-
-```mysql
-ALTER TABLE `kob`.`user` 
-ADD COLUMN `rating` int NULL DEFAULT 1500 AFTER `photo`;
-```
-
-```mysql
-ALTER TABLE `kob`.`bot` 
-DROP COLUMN `rating`;
 ```
 
 pojo层新建Record类
@@ -5468,6 +5458,647 @@ public class Game extends Thread {
             }
         }
     }
+}
+```
+
+### *第3部分代码仓库地址*
+
+就是当前页面
+
+### 6.9 匹配系统微服务设计
+
+原始逻辑
+
+<img src="myResources\6.5 原始逻辑.png" style="zoom:50%;" />
+
+Matching System和WebSocket属于同一个Springboot项目，Client1和Clinent2向后端申请匹配后，后端会新建一个Game线程用于和前端的两个Client交互
+
+微服务逻辑
+
+<img src="myResources\6.6 微服务逻辑.png" style="zoom:50%;" />
+
+Matching System和WebSocket属于两个项目，Client1和Clinent2向WebSocket申请匹配后，WebSocket会向Matching System发送一个http协议，Matching System新建一个Matching线程进行匹配，并将结果通过http协议发送给WebSocket，WebSocket再新建一个Game线程用于和前端的两个Client交互
+
+Matching System属于微服务，使用Spring Cloud实现
+
+### 6.10 backendcloud初始化
+
+按照y总的步骤，新建项目backendcloud，配置pom文件，再添加子模块matchingsystem和backend（按maven创建）
+
+其中matchingsystem的初始目录结构如下：
+
+- src/main
+  1. java
+     - com
+       - kob
+         - matchingsystem
+           - config
+             - SecurityConfig
+           - controller
+             - MatchingController
+           - service
+             - impl
+               - MatchingServieImpl
+             - MatchingService
+           - MatchingSystemApplication
+  2. resources
+     - applications.properties
+
+相关文件的内容：
+
+```java
+...
+
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig extends WebSecurityConfigurerAdapter {
+    @Override
+    protected void configure(HttpSecurity http) throws Exception {
+        http.csrf().disable()
+                .sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                .and()
+                .authorizeRequests()
+                .antMatchers("/player/add/", "/player/remove/").hasIpAddress("127.0.0.1") //限制本地服务器访问，放置客户端直接访问匹配系统
+                .antMatchers(HttpMethod.OPTIONS).permitAll()
+                .anyRequest().authenticated();
+    }
+}
+```
+
+```java
+...
+
+@RestController
+public class MatchingController {
+    @Autowired
+    private MatchingService matchingService;
+
+    @PostMapping("/player/add/")
+    public String addPlayer(@RequestParam MultiValueMap<String, String> data) {
+        Integer userId = Integer.parseInt(Objects.requireNonNull(data.getFirst("user_id")));
+        Integer rating = Integer.parseInt(Objects.requireNonNull(data.getFirst("rating")));
+        return matchingService.addPlayer(userId, rating);
+    }
+
+    @PostMapping("/player/remove/")
+    public String removePlayer(@RequestParam MultiValueMap<String, String> data) {
+        Integer userId = Integer.parseInt(Objects.requireNonNull(data.getFirst("user_id")));
+        return matchingService.removePlayer(userId);
+    }
+}
+```
+
+```java
+package com.kob.matchingsystem.service.impl;
+
+import com.kob.matchingsystem.service.MatchingService;
+import org.springframework.stereotype.Service;
+
+@Service
+public class MatchingServiceImpl implements MatchingService {
+    @Override
+    public String addPlayer(Integer userId, Integer rating) {
+        System.out.println("add player: " + userId + " " + rating);
+        return "add player success";
+    }
+
+    @Override
+    public String removePlayer(Integer userId) {
+        System.out.println("remove player: " + userId);
+        return "remove player success";
+    }
+}
+```
+
+```
+server.port=3001 #3000端口号被backend占了，所以用3001
+```
+
+backend内容可以完全复制前面的backend
+
+导入模块和新建模块可能出现的问题及解决方案：
+
+- maven依赖只有生命周期，没有插件和依赖项，一个解决方法是修改.mvn/wrapper/maven-wrapper.properties，使这个文件的maven版本和本地仓库相同（不相同也可能能用，但版本差太多就会出问题），比如本项目使用的maven仓库版本是3.6.1，则文件就需要这么写：
+
+  ```
+  distributionUrl=https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.6.1/apache-maven-3.6.1-bin.zip
+  wrapperUrl=https://repo.maven.apache.org/maven2/org/apache/maven/wrapper/maven-wrapper/3.2.0/maven-wrapper-3.2.0.jar
+  ```
+
+  其中第一行的两处版本号都要改成3.6.1
+
+- springboot子模块可能无法直接启动，需要在“文件->项目结构”给两个子模块backend和matchingsystem配置源，一般为“src/main/java”
+
+### 6.11 将匹配系统从backend移到matchingsystem
+
+首先需要修改数据库中的user表和bot表，将rating字段转移到user表，因为匹配是需要根据user的rating来的
+
+```mysql
+ALTER TABLE `kob`.`user`
+ADD COLUMN `rating` int NULL DEFAULT 1500 AFTER `photo`;
+```
+
+```mysql
+ALTER TABLE `kob`.`bot`
+DROP COLUMN `rating`;
+```
+
+同时backend中，对应的定义java类的pojo层和涉及到读写user表和bot表的service层需要各自调整
+
+接下来修改backend的几个文件，将匹配系统从backend中移除：
+
+- 新增backend/config/RestTemplateConfig（这是一个配置文件），定义RestTemplate（一个能在两个进程间通讯的工具）为Bean对象
+
+  ```java
+  package com.kob.backend.config;
+  
+  import org.springframework.context.annotation.Bean;
+  import org.springframework.context.annotation.Configuration;
+  import org.springframework.web.client.RestTemplate;
+  
+  @Configuration
+  public class RestTemplateConfig { //一个能在两个进程间通讯的工具类
+      @Bean
+      public RestTemplate getRestTemplate() {
+          return new RestTemplate();
+      }
+  }
+
+- 修改WebServerSocket，移除backend中的匹配系统
+
+  ```java
+  package com.kob.backend.consumer;
+  
+  import com.alibaba.fastjson.JSONObject;
+  import com.kob.backend.config.RestTemplateConfig;
+  import com.kob.backend.consumer.utils.Game;
+  import com.kob.backend.consumer.utils.JwtAuthentication;
+  import com.kob.backend.mapper.RecordMapper;
+  import com.kob.backend.mapper.UserMapper;
+  import com.kob.backend.pojo.User;
+  import org.springframework.beans.factory.annotation.Autowired;
+  import org.springframework.stereotype.Component;
+  import org.springframework.util.LinkedMultiValueMap;
+  import org.springframework.util.MultiValueMap;
+  import org.springframework.web.client.RestTemplate;
+  
+  import javax.websocket.*;
+  import javax.websocket.server.PathParam;
+  import javax.websocket.server.ServerEndpoint;
+  import java.io.IOException;
+  import java.util.Iterator;
+  import java.util.concurrent.ConcurrentHashMap;
+  import java.util.concurrent.CopyOnWriteArraySet;
+  
+  @Component
+  @ServerEndpoint("/websocket/{token}")  // 注意不要以'/'结尾
+  public class WebSocketServer {
+      public final static ConcurrentHashMap<Integer, WebSocketServer> users = new ConcurrentHashMap<>();
+      //这里把原来的matchingsystem给删了，连带着后面所有函数中的matchingsystem.add和matchingsystem.remove也删了
+      private User user;
+      private Session session = null;
+  
+      private static UserMapper userMapper;
+      public static RecordMapper recordMapper;
+      private static RestTemplate restTemplate;
+  
+      private Game game;
+      //向matchingsystem发送的开始匹配和取消匹配的链接
+      private final static String addPlayerUrl = "http://127.0.0.1:3001/player/add/";
+      private final static String removePlayerUrl = "http://127.0.0.1:3001/player/remove/";
+  
+      @Autowired
+      public void setUserMapper(UserMapper userMapper) {
+          WebSocketServer.userMapper = userMapper;
+      }
+  
+      @Autowired
+      public void setRecordMapper(RecordMapper recordMapper) {
+          WebSocketServer.recordMapper = recordMapper;
+      }
+      
+      //将restTemplate注入
+      @Autowired
+      public void setRestTemplateConfig(RestTemplate restTemplate) {
+          WebSocketServer.restTemplate = restTemplate;
+      }
+  
+      ...
+          
+      //把给玩家发匹配信息的部分从startMatching中单独划出来
+      private void startGame(Integer aId, Integer bId) {
+          User a = userMapper.selectById(aId);
+          User b = userMapper.selectById(bId);
+  
+          Game game = new Game(13, 14, 20, a.getId(), b.getId());
+          game.createMap();
+          game.start();
+  
+          users.get(a.getId()).game = game;
+          users.get(b.getId()).game = game;
+  
+          JSONObject respGame = new JSONObject();
+          respGame.put("a_id", game.getPlayerA().getId());
+          respGame.put("a_sx", game.getPlayerA().getSx());
+          respGame.put("a_sy", game.getPlayerA().getSy());
+          respGame.put("b_id", game.getPlayerB().getId());
+          respGame.put("b_sx", game.getPlayerB().getSx());
+          respGame.put("b_sy", game.getPlayerB().getSy());
+          respGame.put("map", game.getG());
+  
+          JSONObject respA = new JSONObject();
+          respA.put("event", "start-matching");
+          respA.put("opponent_username", b.getUsername());
+          respA.put("opponent_photo", b.getPhoto());
+          respA.put("game", respGame);
+          users.get(a.getId()).sendMessage(respA.toJSONString());
+  
+          JSONObject respB = new JSONObject();
+          respB.put("event", "start-matching");
+          respB.put("opponent_username", a.getUsername());
+          respB.put("opponent_photo", a.getPhoto());
+          respB.put("game", respGame);
+          users.get(b.getId()).sendMessage(respB.toJSONString());
+      }
+  
+      private void startMachting() {
+          System.out.println("start matching");
+  
+          //向matchingsystem发送请求开始匹配
+          MultiValueMap<String, String> data = new LinkedMultiValueMap<>();
+          data.add("user_id", user.getId().toString());
+          data.add("rating", user.getRating().toString());
+          restTemplate.postForObject(addPlayerUrl, data, String.class);
+      }
+  
+      private void stopMatching() {
+          System.out.println("stop matching");
+  
+          //向matchingsystem发送请求取消匹配
+          MultiValueMap<String, String> data = new LinkedMultiValueMap<>();
+          data.add("user_id", user.getId().toString());
+          restTemplate.postForObject(removePlayerUrl, data, String.class);
+      }
+  
+      ...
+  }
+  ```
+
+### 6.12 完成matchingsystem的匹配功能
+
+matchingsystem的设计逻辑：
+
+收到请求后，将所有的用户放到一个池子里，开一个额外的线程，每隔一秒钟扫描一遍数组，将能够匹配的玩家匹配到一起；匹配时匹配两名分值接近的玩家，随着时间推移，匹配玩家的分差允许越来越大
+
+根据设计逻辑，需要先写一个继承Thread的MatchingPool类作为匹配池，并在matchingsystem启动时开启这个线程
+
+service/impl/utils/MatchingPool
+
+```java
+...
+
+public class MatchingPool extends Thread {
+
+    @Override
+    public void run() {
+        
+    }
+}
+```
+
+```java
+...
+
+@SpringBootApplication
+public class MatchingSystemApplication {
+    public static void main(String[] args) {
+        MatchingServiceImpl.matchingPool.start(); //启动线程
+        SpringApplication.run(MatchingSystemApplication.class, args);
+    }
+}
+```
+
+之后在MatchingPool中实现匹配和取消匹配的功能
+
+```java
+...
+
+public class MatchingPool extends Thread {
+    private static List<Player> players = new ArrayList<>(); //匹配池中的玩家
+    private ReentrantLock lock = new ReentrantLock(); //控制对匹配池的异步访问
+
+    public void addPlayer(Integer user_id, Integer rating) { //往匹配池中增加玩家
+        lock.lock();
+        try {
+            players.add(new Player(user_id, rating, 0));
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public void removePlayer(Integer user_id) { //往匹配池中减少玩家
+        lock.lock();
+        try {
+            List<Player> newPlayers = new ArrayList<>();
+            for (Player player : players) {
+                if (!player.getUserId().equals(user_id)) {
+                    newPlayers.add(player);
+                }
+            }
+            players = newPlayers;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private void increasingTime() { //将所有当前玩家的等待时间加一，实现时间越长，匹配越容易成功
+        for (Player player : players) {
+            player.setWaitingTime(player.getWaitingTime() + 1);
+        }
+    }
+
+    private boolean checkMatched(Player a, Player b) { //判断两名玩家是否匹配
+        int ratingDelta = Math.abs(a.getRating() - b.getRating());
+        int waitingTime = Math.min(a.getWaitingTime(), b.getWaitingTime());
+        return ratingDelta <= waitingTime * 10;
+    }
+
+    private void returnResult(Player a, Player b) { //返回匹配结果
+        //待实现
+    }
+
+    private void matchPlayers() { //匹配所有玩家
+        boolean[] used = new boolean[players.size()];
+        //越早加入匹配池的玩家在链表的越前面，相当于等待时间更长的玩家有优先匹配权
+        for (int i = 0; i < players.size(); i++) {
+            if (used[i]) {
+                continue;
+            }
+            for (int j = i + 1; j < players.size(); j++) {
+                if (used[j]) {
+                    continue;
+                }
+                Player a = players.get(i), b = players.get(j);
+                if (checkMatched(a, b)) {
+                    returnResult(a, b);
+                    break;
+                }
+            }
+        }
+        
+        //完成匹配后更新匹配池，删除已经匹配的玩家
+        List<Player> newPlayers = new ArrayList<>();
+        for (int i = 0; i < players.size(); i++) {
+            if (!used[i]) {
+                newPlayers.add(players.get(i));
+            }
+        }
+        players = newPlayers;
+    }
+
+    @Override
+    public void run() {
+        while (true) {
+            try {
+                Thread.sleep(1000); //每隔一秒进行一轮匹配
+                lock.lock();
+                try {
+                    increasingTime(); //每轮匹配开始前，每位匹配池中玩家的等待时间增加一
+                    matchPlayers(); //匹配所有玩家
+                } finally {
+                    lock.unlock();
+                }
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+                break;
+            }
+        }
+    }
+}
+```
+
+在MatchingServiveImpl中调用匹配池的功能
+
+```java
+...
+
+@Service
+public class MatchingServiceImpl implements MatchingService {
+    public final static MatchingPool matchingPool = new MatchingPool();
+
+    @Override
+    public String addPlayer(Integer userId, Integer rating) {
+        System.out.println("add player: " + userId + " " + rating);
+        matchingPool.addPlayer(userId, rating);
+        return "add player success";
+    }
+
+    @Override
+    public String removePlayer(Integer userId) {
+        System.out.println("remove player: " + userId);
+        matchingPool.removePlayer(userId);
+        return "remove player success";
+    }
+}
+```
+
+最后需要完成两个系统的交互，即matchingsystem的MatchingPool的returnResult函数（将匹配结果返回给backend）和backend的对应部分
+
+backend要增加pk的controller层和service层
+
+```java
+package com.kob.backend.service.pk;
+
+public interface StartGameService {
+    public String startGame(Integer aId, Integer bId);
+}
+```
+
+```java
+package com.kob.backend.service.impl.pk;
+
+...
+
+@Service
+public class StartGameServiceImpl implements StartGameService {
+    @Override
+    public String startGame(Integer aId, Integer bId) {
+        System.out.println("start game:" + aId + " " + bId);
+        WebSocketServer.startGame(aId, bId);
+        return "start game success";
+    }
+}
+```
+
+```java
+package com.kob.backend.controller.pk;
+
+...
+
+import java.util.Objects;
+
+@RestController
+public class startGameController {
+
+    @Autowired
+    private StartGameService startGameService;
+
+    @PostMapping("/pk/start/game/")
+    public String startGame(@RequestParam MultiValueMap<String, String> data) {
+        Integer aId = Integer.parseInt(Objects.requireNonNull(data.getFirst("a_id")));
+        Integer bId = Integer.parseInt(Objects.requireNonNull(data.getFirst("b_id")));
+        return startGameService.startGame(aId, bId);
+    }
+}
+```
+
+```java
+...
+
+@Configuration
+@EnableWebSecurity
+@ComponentScan(basePackages = {"com.kob.backend.config"})
+public class SecurityConfig extends WebSecurityConfigurerAdapter {
+    @Autowired
+    private JwtAuthenticationTokenFilter jwtAuthenticationTokenFilter;
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    @Override
+    public AuthenticationManager authenticationManagerBean() throws Exception {
+        return super.authenticationManagerBean();
+    }
+
+    @Override
+    protected void configure(HttpSecurity http) throws Exception {
+        http.csrf().disable()
+                .sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                .and()
+                .authorizeRequests()
+                .antMatchers("/user/account/token/", "/user/account/register/").permitAll()
+                .antMatchers("/pk/start/game/").hasIpAddress("127.0.0.1") //控制这一url只有matchingsystem可以访问
+                .antMatchers(HttpMethod.OPTIONS).permitAll()
+                .anyRequest().authenticated();
+
+        http.addFilterBefore(jwtAuthenticationTokenFilter, UsernamePasswordAuthenticationFilter.class);
+    }
+
+    @Override
+    public void configure(WebSecurity web) throws Exception {
+        web.ignoring().antMatchers("/websocket/**");
+    }
+}
+```
+
+matchingsystem和backend一样，需要配置一个RestTemplate使sendGame能向backend发送消息
+
+```java
+...
+
+@Component //加上这一注解才能使@Autowired起效
+public class MatchingPool extends Thread {
+    private static List<Player> players = new ArrayList<>();
+    private final ReentrantLock lock = new ReentrantLock();
+    private static RestTemplate restTemplate;
+    private final static String startGameUrl = "http://127.0.0.1:3000/pk/start/game/";
+
+    @Autowired
+    private void setRestTemplate(RestTemplate resTemplate) {
+        MatchingPool.restTemplate = resTemplate;
+    }
+
+    ...
+
+    private void sendResult(Player a, Player b) {  // 返回匹配结果
+        System.out.println("send result: " + a + " " + b);
+        MultiValueMap<String, String> data = new LinkedMultiValueMap<>();
+        data.add("a_id", a.getUserId().toString());
+        data.add("b_id", b.getUserId().toString());
+        restTemplate.postForObject(startGameUrl, data, String.class);
+    }
+
+    ...
+}
+```
+
+目前仍然存在一个bug：假设一个场景，如果一个玩家点击开始匹配后，因为一些意外，没有取消匹配就关闭页面，则backend的WebSocketServer已经断开和这名玩家的连接，但matchingsystem的匹配池中这名玩家仍然在匹配，就会导致报异常
+
+因此backend在给matchingsystem发送信息前，需要先判断玩家是否还保持与WebSocketServer的连接，因此需要在backend出现users.get的地方都判一次空
+
+Game.java
+
+```java
+...
+
+public class Game extends Thread {
+    ...
+
+    private void sendAllMessage(String message) {
+        if (WebSocketServer.users.get(playerA.getId()) != null) {
+            WebSocketServer.users.get(playerA.getId()).sendMessage(message);
+        }
+        if (WebSocketServer.users.get(playerB.getId()) != null) {
+            WebSocketServer.users.get(playerB.getId()).sendMessage(message);
+        }
+    }
+
+    ...
+}
+```
+
+WebSocketServer.java
+
+```java
+...
+
+@Component
+@ServerEndpoint("/websocket/{token}")  // 注意不要以'/'结尾
+public class WebSocketServer {
+    ...
+
+    public static void startGame(Integer aId, Integer bId) {
+        ...
+
+        if (users.get(a.getId()) != null) {
+            users.get(a.getId()).game = game;
+        }
+        if (users.get(b.getId()) != null) {
+            users.get(b.getId()).game = game;
+        }
+
+        JSONObject respGame = new JSONObject();
+        respGame.put("a_id", game.getPlayerA().getId());
+        respGame.put("a_sx", game.getPlayerA().getSx());
+        respGame.put("a_sy", game.getPlayerA().getSy());
+        respGame.put("b_id", game.getPlayerB().getId());
+        respGame.put("b_sx", game.getPlayerB().getSx());
+        respGame.put("b_sy", game.getPlayerB().getSy());
+        respGame.put("map", game.getG());
+
+        JSONObject respA = new JSONObject();
+        respA.put("event", "start-matching");
+        respA.put("opponent_username", b.getUsername());
+        respA.put("opponent_photo", b.getPhoto());
+        respA.put("game", respGame);
+        if (users.get(a.getId()) != null) {
+            users.get(a.getId()).sendMessage(respA.toJSONString());
+        }
+
+        JSONObject respB = new JSONObject();
+        respB.put("event", "start-matching");
+        respB.put("opponent_username", a.getUsername());
+        respB.put("opponent_photo", a.getPhoto());
+        respB.put("game", respGame);
+        if (users.get(b.getId()) != null) {
+            users.get(b.getId()).sendMessage(respB.toJSONString());
+        }
+    }
+
+    ...
 }
 ```
 
