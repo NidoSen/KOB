@@ -50,7 +50,7 @@ export default {
           });
           setTimeout(() => {
             store.commit("updateStatus", "playing");
-          }, 2000);
+          }, 200);
           store.commit("updateGame", data.game);
         } else if (data.event === "move") {
           console.log(data);
@@ -81,6 +81,7 @@ export default {
 
     onUnmounted(() => {
       socket.close();
+      store.commit("updateLoser", "none"); //关闭ResultBoard
       store.commit("updateStatus", "matching");
     });
   },

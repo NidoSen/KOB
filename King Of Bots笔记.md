@@ -5463,7 +5463,7 @@ public class Game extends Thread {
 
 ### *第3部分代码仓库地址*
 
-就是当前页面
+https://github.com/NidoSen/KOB/tree/f4bd86097f312b67717383afbe46ae302d03b965
 
 ### 6.9 匹配系统微服务设计
 
@@ -6099,6 +6099,690 @@ public class WebSocketServer {
     }
 
     ...
+}
+```
+
+## 7. 实现微服务：Bot代码的执行
+
+### 代码仓库地址
+
+就是当前页面
+
+### 7.1 Bot代码执行微服务的逻辑
+
+<img src="myResources\7.1 Bot执行部分的逻辑.png" style="zoom:50%;" />
+
+Bot代码执行的微服务负责的是接收一段代码，将代码放到队列中，每一次运行一段代码，运行结束将结果返回给服务器
+
+后端需要新建一个botrunningsystem模块，建立过程和matchingsystem基本一致，需要按讲义添加依赖，建立完成后需要新建controller层和service层，同时需要将matchingsystem的utils（包括SecurityConfig和RestTemplateConfig）复制一份到自己这里，并对SecurityConfig进行调整，最后还需要将端口号设置为3002
+
+其中botrunningsystem的初始目录结构如下：
+
+- src/main
+  1. java
+     - com
+       - kob
+         - botrunningsystem
+           - config
+             - SecurityConfig
+             - RestTemplateConfig
+           - controller
+             - BotRunningController
+           - service
+             - impl
+               - BotRunningServieImpl
+             - BotRunningService
+           - BotRunningSystemApplication
+  2. resources
+     - applications.properties
+
+部分相关文件的内容：
+
+```java
+...
+
+@SpringBootApplication
+public class BotRunningSystemApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(BotRunningSystemApplication.class, args);
+    }
+}
+```
+
+```java
+...
+
+@RestController
+public class BotRunningController {
+    @Autowired
+    BotRunningService botRunningService;
+
+    @PostMapping("/bot/add/")
+    public String addBot(@RequestParam MultiValueMap<String, String> data) {
+        Integer userId = Integer.parseInt(Objects.requireNonNull(data.getFirst("user_id")));
+        String botCode = data.getFirst("bot_code");
+        String input = data.getFirst("input");
+        return botRunningService.addBot(userId, botCode, input);
+    }
+}
+```
+
+```java
+...
+
+public interface BotRunningService {
+    String addBot(Integer userId, String botCode, String input);
+}
+```
+
+```java
+...
+
+@Service
+public class BotRunningServiceImpl implements BotRunningService {
+    @Override
+    public String addBot(Integer userId, String botCode, String input) {
+        System.out.println("add bot:" + userId + " " + botCode + " " + input);
+        return "add Bot success";
+    }
+}
+```
+
+### 7.2 前端匹配页面增加Bot选择
+
+为了在游戏流程中增加Bot的执行，需要在匹配游戏前让玩家选择出战的Bot（当然也可以自己来），因此前端的MatchGround需要修改
+
+```vue
+<template>
+  <div class="matchground">
+    <div class="row">
+      ...
+      <div class="col-4">
+        <!-- 加入下拉框 -->
+        <div class="user-select-bot">
+          <!-- select_bot双向绑定 -->
+          <select
+            v-model="select_bot"
+            class="form-select"
+            aria-label="Default select example"
+          >
+            <option value="-1" selected>亲自出马</option><!-- -1代表玩家本身，默认选中的也是这一项 -->
+            <!-- 枚举每一个bot，展示在下拉框中 -->
+            <option v-for="bot in bots" :key="bot.id" :value="bot.id">
+              {{ bot.title }}
+            </option>
+          </select>
+        </div>
+      ...
+    </div>
+  </div>
+</template>
+
+<script>
+import { ref } from "vue";
+import { useStore } from "vuex";
+import $ from "jquery";
+
+export default {
+  setup() {
+    const store = useStore();
+    let match_btn_info = ref("开始匹配");
+    let bots = ref([]); //从后端获取的bot列表
+    let select_bot = ref("-1"); //选中的bot
+
+    ...
+
+    const refresh_bots = () => { //从后端获取bot
+      $.ajax({
+        url: "http://127.0.0.1:3000/user/bot/getlist/",
+        type: "get",
+        headers: {
+          Authorization: "Bearer " + store.state.user.token,
+        },
+        success(resp) {
+          bots.value = resp;
+        },
+      });
+    };
+
+    refresh_bots(); //从云端动态获取bots
+
+    return {
+      match_btn_info,
+      click_match_btn,
+      refresh_bots,
+      bots,
+      select_bot,
+    };
+  },
+};
+</script>
+
+<style scoped>
+...
+div.user-select-bot {
+  padding-top: 20vh; /* 距离顶部为20vh */
+}
+div.user-select-bot > select {
+  width: 60%; /* 控制选择框的宽度 */
+  margin: 0 auto; /* 左右居中 */
+}
+</style>
+```
+
+### 7.3 Bot信息的传递
+
+为了实现Bot参与游戏（原本只有人人对战，现在是人机对战和机机对战都有），前端的select_bot需要传给后端，因此需要修改MatchGround.vue的click_match_btn函数
+
+```vue
+<template>
+...
+</template>
+
+<script>
+...
+
+export default {
+  setup() {
+    ...
+
+    const click_match_btn = () => {
+      if (match_btn_info.value === "开始匹配") {
+        match_btn_info.value = "取消";
+        console.log(select_bot.value);
+        store.state.pk.socket.send(
+          JSON.stringify({
+            event: "start-matching",
+            bot_id: select_bot.value, //将选中的bot编号传给前端
+          })
+        );
+      } else {
+        match_btn_info.value = "开始匹配";
+        store.state.pk.socket.send(
+          JSON.stringify({
+            event: "stop-matching",
+          })
+        );
+      }
+    };
+
+    ...
+  },
+};
+</script>
+
+<style scoped>
+...
+</style>
+```
+
+bot_id数据传给后端后，会在后端有如下顺序的流动：
+
+<img src="myResources\7.2 bot-id的移动.png" style="zoom: 50%;" />
+
+需要配合鼠标中键对后端的backend和matchingsystem进行大量的调整，将所需的bot信息加入到各个相应的位置，直至匹配好的Bot的Id，代码等信息能正常经过matchingsystem走回到backend
+
+下一步需要将匹配的信息中Bot的部分传给botrunningsystem，内容包用户ID，Bot的代码和input信息，其中input信息包括地图，玩家A的起始坐标和操作，玩家B的起始坐标和操作
+
+![](myResources\7.3 游戏信息的编码.png)
+
+```java
+...
+
+public class Game extends Thread {
+    ...
+
+    private final static String addBotUrl = "http://127.0.0.1:3002/bot/add/";
+
+    ...
+
+    private String getInput(Player player) { //将当前的局面信息编码成字符串
+        Player me, you;
+        if (playerA.getId().equals(player.getId())) {
+            me = playerA;
+            you = playerB;
+        } else {
+            me = playerB;
+            you = playerA;
+        }
+        return getMapString() + "#" +
+                me.getSx() + "#" +
+                me.getSy() + "#(" +
+                me.getStepsString() + ")#" +
+                you.getSx() + "#" +
+                you.getSy() + "#(" +
+                you.getStepsString() + ")";
+    }
+
+    private void sendBotCode(Player player) {
+        System.out.println("aaa");
+        if (player.getBotId().equals(-1)); //亲自出马，不用发送Bot代码
+        else {
+            MultiValueMap<String, String> data = new LinkedMultiValueMap<>();
+            data.add("user_id", player.getId().toString());
+            data.add("bot_code", player.getBotCode().toString());
+            data.add("input", getInput(player));
+            WebSocketServer.restTemplate.postForObject(addBotUrl, data, String.class);
+        }
+    }
+
+    private boolean nextStep() { //等待两名玩家的下一步操作
+        try {
+            //先睡200ms，因为前端蛇的移动是等当前移动完，根据当前时间点的数据移动，
+            //所以如果后端nextStep过快，则会导致传到前端的数据，其中有几次在两次移动中间的，会被覆盖掉
+            //因此加上sleep可以避免这种情况
+            Thread.sleep(200);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        sendBotCode(playerA); //将玩家A的Bot代码发给botrunningsystem
+        sendBotCode(playerB); //将玩家B的Bot代码发给botrunningsystem
+
+        for (int i = 0; i < 25; i++) {
+            try {
+                Thread.sleep(200);
+                lock.lock();
+                try {
+                    if (nextStepA != null && nextStepB != null) {
+                        playerA.getSteps().add(nextStepA);
+                        playerB.getSteps().add(nextStepB);
+                        return true;
+                    }
+                } finally {
+                    lock.unlock();
+                }
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+
+        return false;
+    }
+
+    ...
+}
+```
+
+### 7.4 Bot代码的执行
+
+backend发送来的Bot相关信息需要存到一个消息队列里，以生产者消费者模型为基础，botrunningsystem每接收到一个任务就将其放到队列中，然后只要队列非空，就从队头拿一个任务出来执行
+
+与匹配系统不同，Bot执行系统的任务执行必须是实时的，不能让用户等待而导致体验变差
+
+根据以上设计，botrunningsystem需要新增Bot类存储信息，以及BotPool类作为消息队列，且因为消息队列涉及生产者消费者模型，需要调整为多线程执行
+
+```java
+package com.bot.botrunningsystem.service.impl.utils;
+
+...
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class Bot {
+    Integer userId;
+    String botCode;
+    String input;
+}
+```
+
+```java
+package com.bot.botrunningsystem.service.impl.utils;
+
+...
+
+public class BotPool extends Thread {
+    private final ReentrantLock lock = new ReentrantLock(); //控制对队列的异步访问
+    private final Condition condition = lock.newCondition(); //条件变量
+    private final Queue<Bot> bots = new LinkedList<>();
+
+    public void addBot(Integer userId, String botCode, String input) {
+        lock.lock();
+        try {
+            bots.add(new Bot(userId, botCode, input));
+            condition.signal(); //新增用户后唤醒正在等待的run线程，继续consume一个bot
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private void consume(Bot bot) { //消费者进程
+        ;
+    }
+
+    @Override
+    public void run() {
+        while (true) {
+            lock.lock();
+            if (bots.isEmpty()) {
+                try {
+                    condition.await(); //await默认包含一个lock.unlock()的工作
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                    lock.unlock();
+                    break;
+                }
+            } else {
+                Bot bot = bots.remove();
+                lock.unlock();
+                consume(bot); //比较耗时，可能会执行几秒钟，所以要放到lock后面
+            }
+        }
+    }
+}
+```
+
+```java
+package com.bot.botrunningsystem.service.impl;
+
+...
+
+@Service
+public class BotRunningServiceImpl implements BotRunningService {
+    public final static BotPool botPool = new BotPool();
+
+    @Override
+    public String addBot(Integer userId, String botCode, String input) {
+        System.out.println("add bot:" + userId + " " + botCode + " " + input);
+        //往队列中加入bot
+        botPool.addBot(userId, botCode, input);
+        return "add Bot success";
+    }
+}
+```
+
+```java
+package com.bot.botrunningsystem;
+
+...
+
+@SpringBootApplication
+public class BotRunningSystemApplication {
+    public static void main(String[] args) {
+        BotRunningServiceImpl.botPool.start(); //启动队列线程
+        SpringApplication.run(BotRunningSystemApplication.class, args);
+    }
+}
+```
+
+bot的信息交给consum处理后，因为可能出现Bot代码执行死循环的问题，因此需要新开一个线程，实现控制Bot代码执行的时间，超时自动断开
+
+```java
+package com.bot.botrunningsystem.service.impl.utils;
+
+...
+
+public class BotPool extends Thread {
+    ...
+
+    //为了简化问题，只支持实现Java代码，同时为了防止bot代码出现死循环，要开一个线程（可以实现超时自动断开）
+    private void consume(Bot bot) {
+        Consumer consumer = new Consumer();
+        consumer.startTimeout(2000, bot); //执行2秒
+    }
+
+    ...
+}
+```
+
+```java
+package com.bot.botrunningsystem.service.impl.utils;
+
+public class Consumer extends Thread {
+    private Bot bot;
+
+    private void startTimeout(long timeout, Bot bot) {
+        this.bot = bot;
+        this.start(); //新开一个线程，内部会调用run方法
+
+        try {
+            this.join(timeout); //等待timeout时间，如果上面的线程没执行完，就直接断掉
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        } finally {
+            this.interrupt();
+        }
+    }
+
+    @Override
+    public void run() {
+        ;
+    }
+}
+```
+
+最终bot的代码需要在Consumer类的run方法中编译执行，需要调用joor-java依赖提供的编译函数Reflect.compile
+
+```java
+package com.kob.botrunningsystem.utils;
+
+public interface BotInterface {
+    Integer nextMove(String input);
+}
+```
+
+```java
+package com.kob.botrunningsystem.utils; //这里相当于是给用户自己写代码提供的模板，实际不会运行到
+
+public class Bot implements com.kob.botrunningsystem.utils.BotInterface {
+
+    @Override
+    public Integer nextMove(String input) {
+        return 0; //先直接向上走
+    }
+}
+```
+
+```java
+package com.kob.botrunningsystem.service.impl.utils;
+
+...
+
+public class Consumer extends Thread {
+    ...
+
+    private String addUid(String code, String uid) { //在code的Bot类名后面增加uid
+        int k = code.indexOf(" implements com.kob.botrunningsystem.utils.BotInterface");
+        return code.substring(0, k) + uid + code.substring(k);
+    }
+
+    @Override
+    public void run() {
+        //相同的类名只会编译执行一次，因此需要加上一个随机字符串避免重复
+        UUID uuid = UUID.randomUUID();
+        String uid = uuid.toString().substring(0, 8);
+
+        BotInterface botInterface = Reflect.compile(
+                "com.kob.botrunningsystem.utils.Bot" + uid,
+                addUid(bot.getBotCode(), uid) //注意这里用的是用户自己的代码
+        ).create().get();
+
+        Integer direction = botInterface.nextMove(bot.getInput());
+
+        System.out.println("move-direction:" + bot.getUserId() + " " + direction);
+    }
+}
+```
+
+最后需要完成botrunningsystem和backend的通讯，将botrunningsystem得到的bot移动信息返回给backend
+
+botrunningsystem需要完成发送bot移动信息
+
+```java
+package com.kob.botrunningsystem.service.impl.utils;
+
+...
+
+@Component //和下面的Autowired配套使用，将RestTemplate注入
+public class Consumer extends Thread {
+    private Bot bot;
+    private static RestTemplate restTemplate;
+    private final static String receiveBotMoveUrl = "http://127.0.0.1:3000/pk/receive/bot/move/";
+
+    @Autowired
+    public void setRestTemplate(RestTemplate restTemplate) {
+        Consumer.restTemplate = restTemplate;
+    }
+
+    ...
+
+    @Override
+    public void run() {
+        ...
+
+        MultiValueMap<String, String> data = new LinkedMultiValueMap<>();
+        data.add("user_Id", bot.getUserId().toString());
+        data.add("direction", direction.toString());
+        
+        //将bot的移动信息发给backend
+        restTemplate.postForObject(receiveBotMoveUrl, data, String.class);
+    }
+}
+```
+
+backend需要对接收bot移动信息新增service类和controller类
+
+```java
+package com.kob.backend.service.pk;
+
+public interface ReceiveBotMoveService {
+    String receiveBotMove(Integer userId, Integer direction);
+}
+```
+
+```java
+package com.kob.backend.service.impl.pk;
+
+...
+
+@Service
+public class ReceiveBotMoveServiceImpl implements ReceiveBotMoveService {
+    @Override
+    public String receiveBotMove(Integer userId, Integer direction) {
+        System.out.println("receive bot move:" + userId + " " + direction);
+
+        if (WebSocketServer.users.get(userId) != null) {
+            Game game = WebSocketServer.users.get(userId).game;
+            if (game.getPlayerA().getId() == userId) {
+                game.setNextStepA(direction);
+            } else if (game.getPlayerB().getId() == userId) {
+                game.setNextStepB(direction);
+            }
+        }
+
+        return "receive bot move success";
+    }
+}
+```
+
+```java
+package com.kob.backend.controller.pk;
+
+...
+
+@RestController
+public class ReceiveBotMoveServiceController {
+    @Autowired
+    ReceiveBotMoveService receiveBotMoveService;
+
+    @PostMapping("/pk/receive/bot/move/")
+    public String receiveBotMove(@RequestParam MultiValueMap<String, String> data) {
+        Integer userId = Integer.parseInt(Objects.requireNonNull(data.getFirst("user_Id")));
+        Integer direction  = Integer.parseInt(Objects.requireNonNull(data.getFirst("direction")));
+        return receiveBotMoveService.receiveBotMove(userId, direction);
+    }
+}
+```
+
+后端完成前端有个小细节要调整，PkIndexView的setTimeout（）那个时间，要写成200， 如果设置太大会吞一部分代码。
+
+最终与bot相关的数据流向图：
+
+<img src="myResources\7.4 最终的数据流动.png" style="zoom:50%;" />
+
+### 7.5 一个相对智能的AI Bot
+
+目前提供的AI是一种傻瓜式的AI，只会沿着一个方向走，y总提供了一种相对智能的、能判断下一步能不能走的AI（y总nb）
+
+```java
+package com.kob.botrunningsystem.utils;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class Bot implements com.kob.botrunningsystem.utils.BotInterface {
+    static class Cell {
+        public int x, y;
+
+        public Cell(int x, int y) {
+            this.x = x;
+            this.y = y;
+        }
+    }
+
+    private boolean check_tail_increasing(int step) { //检测当前回合蛇的长度是否增加
+        return step <= 10 || step % 3 == 1;
+    }
+
+    public List<Cell> getCells(int sx, int sy, String steps) { //重建蛇
+        steps = steps.substring(1, steps.length() - 1); //去掉左右的括号
+        List<Cell> res = new ArrayList<>();
+
+        int[] dx = {-1, 0, 1, 0}, dy = {0, 1, 0, -1};
+        int x = sx, y = sy;
+        int step = 0;
+        res.add(new Cell(x, y)); //起始位置
+        for (int i = 0; i < steps.length(); i++) {
+            int d = steps.charAt(i) - '0';
+            x += dx[d];
+            y += dy[d];
+            res.add(new Cell(x, y)); //增加一节蛇身
+            //如果蛇身没有变长，就去掉最后一个点（对应的是0位置处的Cell，下标最大的Cell始终记录舌头位置）
+            if (!check_tail_increasing(++step)) {
+                res.remove(0);
+            }
+        }
+        return res;
+    }
+
+    @Override
+    public Integer nextMove(String input) {
+        String[] strs = input.split("#");
+
+        int[][] g = new int[13][14];
+        for (int i = 0, k = 0; i < 13; i++) {
+            for (int j = 0; j < 14; j++, k++) {
+                if (strs[0].charAt(k) == '1') {
+                    g[i][j] = 1;
+                }
+            }
+        }
+
+        int aSx = Integer.parseInt(strs[1]), aSy = Integer.parseInt(strs[2]);
+        int bSx = Integer.parseInt(strs[4]), bSy = Integer.parseInt(strs[5]);
+
+        List<Cell> aCells = getCells(aSx, aSy, strs[3]);
+        List<Cell> bCells = getCells(bSx, bSy, strs[6]);
+
+        for (Cell c : aCells) {
+            g[c.x][c.y] = 1;
+        }
+        for (Cell c : bCells) {
+            g[c.x][c.y] = 1;
+        }
+
+        int[] dx = {-1, 0, 1, 0}, dy = {0, 1, 0, -1};
+        for (int i = 0; i < 4; i++) {
+            int x = aCells.get(aCells.size() - 1).x + dx[i];
+            int y = aCells.get(aCells.size() - 1).y + dy[i];
+            if (x >= 0 && x < 13 && y >= 0 && y < 14 && g[x][y] == 0) {
+                return i;
+            }
+        }
+
+        return 0; //四条路都堵死了，就直接向上走自杀
+    }
 }
 ```
 
