@@ -1,6 +1,10 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import {
+  createRouter,
+  createWebHistory
+} from 'vue-router'
 import PkIndexView from '../views/pk/PkIndexView.vue'
 import RecordIndexView from '../views/record/RecordIndexView.vue'
+import RecordContentView from '../views/record/RecordContentView.vue'
 import RanklistIndexView from '../views/ranklist/RanklistIndexView.vue'
 import UserBotIndexView from '../views/user/bots/UserBotIndexView.vue'
 import NotFound from '../views/error/NotFound.vue'
@@ -9,8 +13,7 @@ import UserAccountRegisterView from '../views/user/account/UserAccountRegisterVi
 import store from '../store/index.js'
 
 
-const routes = [
-  {
+const routes = [{
     path: "/",
     name: "home",
     redirect: "/pk/",
@@ -30,6 +33,14 @@ const routes = [
     path: "/record/",
     name: "record_index",
     component: RecordIndexView,
+    meta: {
+      requestAuth: true,
+    }
+  },
+  {
+    path: "/record/:recordId",
+    name: "record_content",
+    component: RecordContentView,
     meta: {
       requestAuth: true,
     }
@@ -87,9 +98,10 @@ const router = createRouter({
 
 router.beforeEach((to, from, next) => {
   if (to.meta.requestAuth && !store.state.user.is_login) { // 组件中使用$store
-    next({ name: "user_account_login" });
-  }
-  else {
+    next({
+      name: "user_account_login"
+    });
+  } else {
     next();
   }
 })

@@ -6106,7 +6106,7 @@ public class WebSocketServer {
 
 ### 代码仓库地址
 
-就是当前页面
+https://github.com/NidoSen/KOB/tree/f1514f1a964e2819277fa8594c25389e175b89f2
 
 ### 7.1 Bot代码执行微服务的逻辑
 
@@ -6785,4 +6785,901 @@ public class Bot implements com.kob.botrunningsystem.utils.BotInterface {
     }
 }
 ```
+
+## 8. 创建对战列表与排行榜页面
+
+### 代码仓库地址
+
+就是本页面
+
+### 8.1 存储天梯积分
+
+比较简单，修改下backend的Game类就行
+
+```java
+package com.kob.backend.consumer.utils;
+
+...
+
+public class Game extends Thread {
+    ...
+
+    private void updateUserRating(Player player, Integer rating) {
+        User user = WebSocketServer.userMapper.selectById(player.getId());
+        user.setRating(rating);
+        WebSocketServer.userMapper.updateById(user);
+    }
+
+    private void saveToDatabase() {
+        Integer ratingA = WebSocketServer.userMapper.selectById(playerA.getId()).getRating();
+        Integer ratingB = WebSocketServer.userMapper.selectById(playerB.getId()).getRating();
+
+        if ("A".equals(loser)) {
+            ratingA -= 2;
+            ratingB += 5;
+        } else if ("B".equals(loser)) {
+            ratingA += 2;
+            ratingB -= 5;
+        }
+
+        updateUserRating(playerA, ratingA);
+        updateUserRating(playerB, ratingB);
+
+        Record record = new Record(
+                null,
+                playerA.getId(),
+                playerA.getSx(),
+                playerA.getSy(),
+                playerB.getId(),
+                playerB.getSx(),
+                playerB.getSy(),
+                playerA.getStepsString(),
+                playerB.getStepsString(),
+                getMapString(),
+                loser,
+                new Date()
+        );
+
+        WebSocketServer.recordMapper.insert(record);
+    }
+    ...
+}
+```
+
+### 8.2 后端完成获取对战记录功能
+
+和获取用户信息类似，创建record的controller层和service层（mapper层之前已经创建过了）；考虑到对战记录很多，因此要实现分页功能，需要多配置一个分页类
+
+```java
+package com.kob.backend.config;
+
+...
+
+@Configuration
+public class MybatisConfig { //实现分页功能的配置类
+    @Bean
+    public MybatisPlusInterceptor mybatisPlusInterceptor() {
+        MybatisPlusInterceptor interceptor = new MybatisPlusInterceptor();
+        interceptor.addInnerInterceptor(new PaginationInnerInterceptor(DbType.MYSQL));
+        return interceptor;
+    }
+}
+```
+
+mapper层（之前其实已经实现过）
+
+```java
+package com.kob.backend.mapper;
+
+...
+
+@Mapper
+public interface RecordMapper extends BaseMapper<Record> {
+
+}
+```
+
+service层
+
+```java
+package com.kob.backend.service.record;
+
+...
+
+public interface GetRecordListService {
+    JSONObject getList(Integer page);
+}
+```
+
+```java
+package com.kob.backend.service.impl.record;
+
+...
+
+@Service
+public class GetRecordListServiceImpl implements GetRecordListService {
+    @Autowired
+    private RecordMapper recordMapper;
+    @Autowired
+    private UserMapper userMapper;
+
+    @Override
+    public JSONObject getList(Integer page) {
+        IPage<Record> recordIPage = new Page<>(page, 10); //每页展示10条记录
+        QueryWrapper<Record> queryWrapper = new QueryWrapper<>();
+        queryWrapper.orderByAsc("id"); //得到战斗记录按照用户id降序排列
+        List<Record> records = recordMapper.selectPage(recordIPage, queryWrapper).getRecords();
+
+        JSONObject resp = new JSONObject(); //最终返回的是JSON格式的数据
+        List<JSONObject> items = new LinkedList<>(); //存放记录及其相关信息
+        for (Record record : records) {
+            User userA = userMapper.selectById(record.getAId());
+            User userB = userMapper.selectById(record.getBId());
+            JSONObject item = new JSONObject();
+            item.put("a_photo", userA.getPhoto());
+            item.put("a_username", userA.getUsername());
+            item.put("b_photo", userB.getPhoto());
+            item.put("b_username", userB.getUsername());
+            String result = "平局";
+            if ("A".equals(record.getLoser())) {
+                result = "B胜";
+            } else if ("B".equals(record.getLoser())) {
+                result = "A胜";
+            }
+            item.put("result", result);
+            item.put("record", record);
+            items.add(item);
+        }
+        resp.put("records", items);
+        //因为需要知道总页数，所以需要再返回对局记录的数量
+        resp.put("records_count", recordMapper.selectCount(null).toString());
+
+        return resp;
+    }
+}
+```
+
+controller层
+
+```java
+package com.kob.backend.controller.record;
+
+...
+
+@RestController
+public class GetRecordListController {
+    @Autowired
+    private GetRecordListService getRecordListService;
+
+    @RequestMapping("/record/getlist/")
+    JSONObject getList(@RequestParam Map<String, String> data) {
+        Integer page = Integer.parseInt(data.get("page"));
+        return getRecordListService.getList(page);
+    }
+}
+```
+
+### 8.3 前端实现对战列表功能
+
+先修改RecordIndexView.vue，展示第一页的10条对战记录
+
+```vue
+<template>
+  <ContentField>
+    <table class="table table-hover">
+      <thead>
+        <tr style="text-align: center">
+          <th>A</th>
+          <th>B</th>
+          <th>对战结果</th>
+          <th>对战时间</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr
+          v-for="record in records"
+          :key="record.record.id"
+          style="text-align: center"
+        >
+          <td>
+            <img :src="record.a_photo" alt="" class="record-user-photo" />
+            &nbsp;
+            <span class="record-user-username">{{ record.a_username }}</span>
+          </td>
+          <td>
+            <img :src="record.b_photo" alt="" class="record-user-photo" />
+            &nbsp;
+            <span class="record-user-username">{{ record.b_username }}</span>
+          </td>
+          <td>
+            {{ record.result }}
+          </td>
+          <td>
+            {{ record.record.createtime }}
+          </td>
+          <td>
+            <button type="button" class="btn btn-secondary">查看录像</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </ContentField>
+</template>
+
+<script>
+import ContentField from "../../components/ContentField.vue";
+import { useStore } from "vuex";
+import { ref } from "vue";
+import $ from "jquery";
+
+export default {
+  components: {
+    ContentField,
+  },
+  setup() {
+    const store = useStore();
+    let records = ref([]);
+    let current_page = 1;
+    let total_records = 0;
+
+    console.log(total_records);
+
+    const pull_page = (page) => {
+      current_page = page;
+      $.ajax({
+        url: "http://127.0.0.1:3000/record/getlist/",
+        type: "get",
+        data: {
+          page,
+        },
+        headers: {
+          Authorization: "Bearer " + store.state.user.token,
+        },
+        success(resp) {
+          console.log(records);
+          records.value = resp.records;
+          total_records = resp.records_count;
+        },
+        error(resp) {
+          console.log(resp);
+        },
+      });
+    };
+
+    pull_page(current_page);
+
+    return {
+      records,
+    };
+  },
+};
+</script>
+
+<style scoped>
+img.record-user-photo {
+  width: 4vh;
+  border-radius: 50%;
+}
+</style>
+```
+
+接下来需要实现对局记录复现功能，需要的相关数据和函数如下：
+
+- 涉及的数据包括：游戏初始地图，两蛇初始位置，两蛇的操作序列，谁输谁赢
+- 前端需要先接收来自后端的游戏记录信息，因此必须在store中修改和新增相关文件记录信息，同时还需要设置一个变量用于区分当前是pk页面的游戏界面，还是对战记录复现界面
+- pk.js还存储了store中修改地图和蛇的起始位置的函数，这两个函数能够初始化对局页面
+- 新增的对局记录页面，需要修改路由表才能到达
+
+接收后端传来的游戏信息需要更改store中的文件：
+
+新建的store/record.js文件
+
+```js
+export default {
+    state: {
+        is_record: false, //是否需要切换到对战记录复现界面
+        a_steps: "", //a的操作序列
+        b_steps: "", //b的操作序列
+        record_loser: "", //谁输了（注意这里不能和pk.js里的loser重名，尽管两者属于不同的文件）
+    },
+    getters: {
+
+    },
+    mutations: {
+        updateIsRecord(state, is_record) {
+            state.is_record = is_record;
+        },
+        updateSteps(state, data) {
+            state.a_steps = data.a_steps;
+            state.b_steps = data.b_steps;
+        },
+        updateRecordLoser(state, record_loser) {
+            state.record_loser = record_loser;
+        }
+    },
+    modules: {}
+}
+```
+
+修改后的store/index.js文件
+
+```js
+...
+import ModuleRecord from './record'
+
+export default createStore({
+  ...
+  modules: {
+    ...
+    record: ModuleRecord,
+  }
+})
+```
+
+计划新增组件RecordContentView.vue用于实现对战记录复现页面，因此需要在路由表router/index.js中增加相关内容：
+
+```js
+...
+import RecordContentView from '../views/record/RecordContentView.vue'
+...
+
+
+const routes = [
+  ...
+  {
+    path: "/record/:record", //加上:表示是一个参数而不是固定的字符串
+    name: "record_content",
+    component: RecordContentView,
+    meta: {
+      requestAuth: true,
+    }
+  },
+  ...
+]
+
+...
+```
+
+RecordContentView.vue组件需要调用PlayGround.vue重新生成游戏页面，且因为pk页面和对局记录复现页面共用PlayGround.vue组件，所以为了避免pk页面的实时游戏和对局记录复现页面的复现游戏冲突，需要在PkIndexView.vue中设置store中的is_record为false
+
+RecordContentView.vue：
+
+```vue
+<template>
+  <div>
+    <PlayGround />
+  </div>
+</template>
+
+<script>
+import PlayGround from "../../components/PlayGround.vue";
+
+export default {
+  components: {
+    PlayGround,
+  },
+  setup() {},
+};
+</script>
+
+<style scoped></style>
+```
+
+PkIndexView.vue：
+
+```vue
+...
+
+<script>
+...
+
+export default {
+  components: {
+    PlayGround,
+    MatchGround,
+    ResultBoard,
+  },
+  setup() {
+    ...
+
+    store.commit("updateIsRecord", false); //关闭对战回放页面
+
+    ...
+  },
+};
+</script>
+
+<style scoped></style>
+```
+
+接下来，在组件RecordIndexView.vue中，需要完成存储需要复现的游戏数据和切换到对局记录复现页面的功能
+
+```vue
+...
+
+<script>
+import ContentField from "../../components/ContentField.vue";
+import { useStore } from "vuex";
+import { ref } from "vue";
+import $ from "jquery";
+import router from "../../router/index";
+
+export default {
+  components: {
+    ContentField,
+  },
+  setup() {
+    const store = useStore();
+    let records = ref([]);
+    let current_page = 1;
+    let total_records = 0;
+
+    console.log(total_records);
+
+    ...
+
+    const stringTo2D = (map) => { //将后端的字符串地图数据转化为二维数组
+      let g = [];
+      for (let i = 0, k = 0; i < 13; i++) {
+        let line = [];
+        for (let j = 0; j < 14; j++, k++) {
+          if (map[k] == "0") {
+            line.push(0);
+          } else {
+            line.push(1);
+          }
+        }
+        g.push(line);
+      }
+      return g;
+    };
+
+    const open_record_content = (recordId) => {
+      for (const record of records.value) {
+        if (record.record.id === recordId) {
+          store.commit("updateIsRecord", true); //准备转到对局记录复现页面，更新is_record
+          store.commit("updateGame", { //初始化游戏地图和两蛇的位置
+            map: stringTo2D(record.record.map),
+            a_id: record.record.aid,
+            a_sx: record.record.asx,
+            a_sy: record.record.asy,
+            b_id: record.record.bid,
+            b_sx: record.record.bsx,
+            b_sy: record.record.bsy,
+          });
+          store.commit("updateSteps", { //传入两蛇的操作序列
+            a_steps: record.record.asteps,
+            b_steps: record.record.bsteps,
+          });
+          store.commit("updateRecordLoser", record.record.loser); //记录游戏结束时谁输了
+          router.push({ //跳转到复现页面
+            name: "record_content",
+            params: {
+              recordId,
+            },
+          });
+          break;
+        }
+      }
+    };
+
+    return {
+      records,
+      open_record_content,
+    };
+  },
+};
+</script>
+
+<style scoped>
+img.record-user-photo {
+  width: 4vh;
+  border-radius: 50%;
+}
+</style>
+```
+
+最后修改GameMap.js，实现对局记录复现功能
+
+```js
+...
+
+export class GameMap extends AcGameObject {
+   ...
+
+    add_listening_events() { // 获取键盘输入，设置两条蛇的行动方向
+        //如果是录像
+        if (this.store.state.record.is_record) {
+            //每300ms执行一次
+            let k = 0;
+            const a_steps = this.store.state.record.a_steps;
+            const b_steps = this.store.state.record.b_steps;
+            const [snake0, snake1] = this.snakes;
+            const loser = this.store.state.record.record_loser;
+            const interval_id = setInterval(() => {
+                if (k >= a_steps.length - 1) {
+                    if (loser === "all" || loser === "A") {
+                        snake0.status = "die";
+                    }
+                    if (loser === "all" || loser === "B") {
+                        snake1.status = "die";
+                    }
+                    clearInterval(interval_id);
+                } else {
+                    snake0.set_direction(parseInt(a_steps[k]));
+                    snake1.set_direction(parseInt(b_steps[k]));
+                    k++;
+                }
+            }, 300); //setInterval是一个库函数，300表示每300ms执行一次
+        } else {
+            ...
+        }
+    }
+
+    ...
+}
+```
+
+最后是在RecordIndexView.vue实现分页的功能
+
+```vue
+<template>
+  <ContentField>
+    ...
+    <!-- bootstrap上提供的分页条 float: right 实现将分页条放置在右边-->
+    <nav aria-label="..." style="float: right">
+      <ul class="pagination">
+        <li class="page-item">
+          <a class="page-link" href="#" @click="click_page(-2)">前一页</a>
+        </li>
+        <li
+          :class="'page-item ' + page.is_active"
+          v-for="page in pages"
+          :key="page.number"
+        >
+          <a class="page-link" href="#" @click="click_page(page.number)">
+            {{ page.number }}
+          </a>
+        </li>
+        <li class="page-item">
+          <a class="page-link" href="#" @click="click_page(-1)">后一页</a>
+        </li>
+      </ul>
+    </nav>
+  </ContentField>
+</template>
+
+<script>
+import ContentField from "../../components/ContentField.vue";
+import { useStore } from "vuex";
+import { ref } from "vue";
+import $ from "jquery";
+import router from "../../router/index";
+
+export default {
+  components: {
+    ContentField,
+  },
+  setup() {
+    const store = useStore();
+    let records = ref([]);
+    let current_page = 1;
+    let total_records = 0;
+    let pages = ref([]);
+
+    const click_page = (page) => {
+      //点击分页条的“上一页”，“下一页”和数字
+      if (page == -2) {
+        //-2表示点击上一页
+        page = current_page - 1;
+      } else if (page == -1) {
+        //-1表示点击下一页
+        page = current_page + 1;
+      }
+      let max_pages = parseInt(Math.ceil(total_records / 10));
+      if (page >= 1 && page <= max_pages) {
+        pull_page(page); //如果点击有效，就重新拉取对局记录并更新页码
+      }
+    };
+
+    const update_pages = () => {
+      //点击分页条个选项后需要调整当前可选页面（范围为[当前页面-2, 当前页面+2]）
+      let max_pages = parseInt(Math.ceil(total_records / 10));
+      let new_pages = [];
+      for (let i = current_page - 2; i <= current_page + 2; i++) {
+        if (i >= 1 && i <= max_pages) {
+          //可选页面的最小值和最大值有要求
+          new_pages.push({
+            number: i,
+            is_active: i === current_page ? "active" : "",
+          });
+        }
+      }
+      pages.value = new_pages;
+    };
+
+    console.log(total_records);
+
+    const pull_page = (page) => {
+      current_page = page;
+      $.ajax({
+        url: "http://127.0.0.1:3000/record/getlist/",
+        type: "get",
+        data: {
+          page,
+        },
+        headers: {
+          Authorization: "Bearer " + store.state.user.token,
+        },
+        success(resp) {
+          console.log(records);
+          records.value = resp.records;
+          total_records = resp.records_count;
+          update_pages(); //拉取对战记录后，更新当前可选页面
+        },
+        error(resp) {
+          console.log(resp);
+        },
+      });
+    };
+
+    pull_page(current_page);
+
+    ...
+
+    return {
+      records,
+      open_record_content,
+      pages,
+      click_page,
+    };
+  },
+};
+</script>
+
+...
+```
+
+### 8.4 实现排行榜
+
+类似对战列表，需要现在后端添加ranklist的controller层，service层
+
+```java
+package com.kob.backend.service.ranklist;
+
+import com.alibaba.fastjson.JSONObject;
+
+public interface GetRanklistService {
+    JSONObject getList(Integer page);
+}
+```
+
+```java
+package com.kob.backend.service.impl.ranklist;
+
+...
+
+@Service
+public class GetRanklistServiceImpl implements GetRanklistService {
+    @Autowired
+    private UserMapper userMapper;
+
+    @Override
+    public JSONObject getList(Integer page) {
+        IPage<User> userIPage = new Page<>(page, 3);
+        QueryWrapper<User> queryWrapper = new QueryWrapper<>();
+        queryWrapper.orderByDesc("rating");
+        List<User> users = userMapper.selectPage(userIPage, queryWrapper).getRecords();
+        JSONObject resp = new JSONObject();
+        for (User user: users) { //清空密码，避免泄露
+            user.setPassword("");
+        }
+        resp.put("users", users);
+        resp.put("users_count", userMapper.selectCount(null));
+
+        return resp;
+    }
+}
+```
+
+```java
+package com.kob.backend.controller.ranklist;
+
+...
+
+@RestController
+public class GetRanklistController {
+    @Autowired
+    GetRanklistService getRanklistService;
+
+    @GetMapping("/ranklist/getlist/")
+    public JSONObject getList(@RequestParam Map<String, String> data) {
+        Integer page = Integer.parseInt(data.get("page"));
+        return getRanklistService.getList(page);
+    }
+}
+```
+
+相应的前端页面：
+
+```vue
+<template>
+  <ContentField>
+    <table class="table table-hover" style="text-align: center">
+      <thead>
+        <tr>
+          <th>玩家</th>
+          <th>天梯分</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="user in users" :key="user.id">
+          <td>
+            <img :src="user.photo" alt="" class="user-photo" />
+            &nbsp;
+            <span class="record-user-username">{{ user.username }}</span>
+          </td>
+          <td>
+            {{ user.rating }}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <!-- bootstrap上提供的分页条 float: right 实现将分页条放置在右边-->
+    <nav aria-label="..." style="float: right">
+      <ul class="pagination">
+        <li class="page-item">
+          <a class="page-link" href="#" @click="click_page(-2)">前一页</a>
+        </li>
+        <li
+          :class="'page-item ' + page.is_active"
+          v-for="page in pages"
+          :key="page.number"
+        >
+          <a class="page-link" href="#" @click="click_page(page.number)">
+            {{ page.number }}
+          </a>
+        </li>
+        <li class="page-item">
+          <a class="page-link" href="#" @click="click_page(-1)">后一页</a>
+        </li>
+      </ul>
+    </nav>
+  </ContentField>
+</template>
+
+<script>
+import ContentField from "../../components/ContentField.vue";
+import { useStore } from "vuex";
+import { ref } from "vue";
+import $ from "jquery";
+
+export default {
+  components: {
+    ContentField,
+  },
+  setup() {
+    const store = useStore();
+    let users = ref([]);
+    let current_page = 1;
+    let total_users = 0;
+    let pages = ref([]);
+
+    const click_page = (page) => {
+      //点击分页条的“上一页”，“下一页”和数字
+      if (page == -2) {
+        //-2表示点击上一页
+        page = current_page - 1;
+      } else if (page == -1) {
+        //-1表示点击下一页
+        page = current_page + 1;
+      }
+      let max_pages = parseInt(Math.ceil(total_users / 3));
+      if (page >= 1 && page <= max_pages) {
+        pull_page(page); //如果点击有效，就重新拉取对局记录并更新页码
+      }
+    };
+
+    const update_pages = () => {
+      //点击分页条个选项后需要调整当前可选页面（范围为[当前页面-2, 当前页面+2]）
+      let max_pages = parseInt(Math.ceil(total_users / 3));
+      let new_pages = [];
+      for (let i = current_page - 2; i <= current_page + 2; i++) {
+        if (i >= 1 && i <= max_pages) {
+          //可选页面的最小值和最大值有要求
+          new_pages.push({
+            number: i,
+            is_active: i === current_page ? "active" : "",
+          });
+        }
+      }
+      pages.value = new_pages;
+    };
+
+    const pull_page = (page) => {
+      current_page = page;
+      $.ajax({
+        url: "http://127.0.0.1:3000/ranklist/getlist/",
+        type: "get",
+        data: {
+          page,
+        },
+        headers: {
+          Authorization: "Bearer " + store.state.user.token,
+        },
+        success(resp) {
+          users.value = resp.users;
+          total_users = resp.users_count;
+          update_pages(); //拉取对战记录后，更新当前可选页面
+        },
+        error(resp) {
+          console.log(resp);
+        },
+      });
+    };
+
+    pull_page(current_page);
+
+    return {
+      users,
+      pages,
+      click_page,
+    };
+  },
+};
+</script>
+
+<style scoped>
+img.user-photo {
+  width: 4vh;
+  border-radius: 50%;
+}
+</style>
+```
+
+### 8.5 限制用户创建的Bot数量
+
+Bot页面的分页在本项目并没有实现，考虑到匹配页面的Bot不好分页，并结合实际情况，更合理的做法是限制用户创建的Bot数量
+
+```java
+package com.kob.backend.service.impl.user.bot;
+
+...
+
+@Service
+public class AddServiceImpl implements AddService {
+
+    @Autowired
+    private BotMapper botMapper;
+
+    @Override
+    public Map<String, String> add(Map<String, String> data) {
+        UsernamePasswordAuthenticationToken authenticationToken =
+                (UsernamePasswordAuthenticationToken) SecurityContextHolder.getContext().getAuthentication();
+        UserDetailsImpl loginUser = (UserDetailsImpl) authenticationToken.getPrincipal();
+        User user = loginUser.getUser();
+
+        String title = data.get("title");
+        String description = data.get("description");
+        String content = data.get("content");
+
+        Map<String, String> map = new HashMap<>();
+
+        ...
+
+        //限制用户创建的Bot数量
+        QueryWrapper<Bot> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("user_id", user.getId());
+        if (botMapper.selectCount(queryWrapper) >= 10) {
+            map.put("error_message", "每个用户最多只能创建10个Bot！");
+            return map;
+        }
+
+        ...
+    }
+}
+```
+
+
 

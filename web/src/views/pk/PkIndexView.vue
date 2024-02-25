@@ -23,6 +23,8 @@ export default {
     const store = useStore();
     const socketUrl = `ws://127.0.0.1:3000/websocket/${store.state.user.token}/`; //注意这里是`不是单引号'
 
+    store.commit("updateIsRecord", false); //关闭对战回放页面
+
     let socket = null;
     //挂载完成，创建一个连接
     onMounted(() => {
